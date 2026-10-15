@@ -1,6 +1,6 @@
 {
   "name": "videoclient",
-  "version": "0.2.14",
+  "version": "0.2.16",
   "private": true,
   "description": "Windows and macOS VOD desktop player",
   "main": "electron/main.cjs",

@@ -294,6 +294,7 @@ export default function App() {
   const [customError, setCustomError] = useState("");
   const [customCategoryError, setCustomCategoryError] = useState("");
   const [customReload, setCustomReload] = useState(0);
+  const [customSourceOpen, setCustomSourceOpen] = useState(false);
   const [subscriptionUrl, setSubscriptionUrl] = useState(
     readStorage("vod-subscription-url", ""),
   );
@@ -351,6 +352,9 @@ export default function App() {
   const detailSerial = useRef(0);
   const progressSaved = useRef(0);
   const pageScroll = useRef<HTMLDivElement>(null);
+  const customSourcePicker = useRef<HTMLDivElement>(null);
+  const customCategoryCache = useRef(new Map<string, SourceCategory[]>());
+  const loadedCustomCatalog = useRef("");
   const casting = castingDevice?.name || "";
   const enabledSources = sources.filter(
     (source) => enabled.includes(source.url) && !source.isAdult,
@@ -365,6 +369,27 @@ export default function App() {
       saveStorage("custom-source-url", customSource.url);
     }
   }, [customSource?.url, customSourceUrl]);
+
+  useEffect(() => {
+    if (!customSourceOpen) return;
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (!customSourcePicker.current?.contains(event.target as Node))
+        setCustomSourceOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setCustomSourceOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [customSourceOpen]);
+
+  useEffect(() => {
+    if (section !== "custom") setCustomSourceOpen(false);
+  }, [section]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -406,13 +431,23 @@ export default function App() {
 
   useEffect(() => {
     if (section !== "custom" || !customSource) return;
+    const cacheKey = JSON.stringify([customSource.url, customReload]);
+    const cached = customCategoryCache.current.get(cacheKey);
+    if (cached) {
+      // 从其他页面返回时直接恢复该点播源的分类和标签。
+      setCustomCategories(cached);
+      setCustomCategoryError("");
+      return;
+    }
     let cancelled = false;
     setCustomCategories([]);
     setCustomCategoryError("");
     window.videoAPI
       .sourceCategories(customSource.url)
       .then((items) => {
-        if (!cancelled) setCustomCategories(items);
+        if (cancelled) return;
+        customCategoryCache.current.set(cacheKey, items);
+        setCustomCategories(items);
       })
       .catch((error) => {
         if (!cancelled) setCustomCategoryError(error.message);
@@ -424,6 +459,14 @@ export default function App() {
 
   useEffect(() => {
     if (section !== "custom" || !customSource) return;
+    const requestKey = JSON.stringify([
+      customSource.url,
+      customCategoryId,
+      customPage,
+      customReload,
+    ]);
+    // 同一筛选页返回时沿用已有列表，避免清空后再次请求。
+    if (loadedCustomCatalog.current === requestKey) return;
     let cancelled = false;
     setCustomLoading(true);
     setCustomError("");
@@ -439,6 +482,7 @@ export default function App() {
           return [...previous, ...items.filter((item) => !seen.has(item.id))];
         });
         setCustomPageCount(pageCount);
+        loadedCustomCatalog.current = requestKey;
       })
       .catch((error) => {
         if (!cancelled) setCustomError(error.message);
@@ -1274,6 +1318,68 @@ export default function App() {
                       自定义 <span>点播源最近更新</span>
                     </h2>
                   </div>
+                  {customSource && (
+                    <div
+                      className="custom-source-picker"
+                      ref={customSourcePicker}
+                    >
+                      <span>点播源</span>
+                      <button
+                        className="custom-source-trigger"
+                        type="button"
+                        aria-label={`选择点播源，当前：${customSource.name}`}
+                        aria-haspopup="listbox"
+                        aria-expanded={customSourceOpen}
+                        onClick={() => setCustomSourceOpen((open) => !open)}
+                      >
+                        <span className="custom-source-dot" />
+                        <strong>{customSource.name}</strong>
+                        <ChevronDown size={16} />
+                      </button>
+                      {customSourceOpen && (
+                        <div
+                          className="custom-source-menu"
+                          role="listbox"
+                          aria-label="已启用的点播源"
+                        >
+                          <div className="custom-source-menu-title">
+                            已启用点播源 · {enabledSources.length}
+                          </div>
+                          {enabledSources.map((source) => (
+                            <button
+                              key={source.url}
+                              type="button"
+                              role="option"
+                              aria-selected={source.url === customSource.url}
+                              className={
+                                source.url === customSource.url
+                                  ? "selected"
+                                  : ""
+                              }
+                              onClick={() => {
+                                setCustomSourceOpen(false);
+                                if (source.url === customSource.url) return;
+                                setCustomSourceUrl(source.url);
+                                saveStorage("custom-source-url", source.url);
+                                setCustomCategories(
+                                  customCategoryCache.current.get(
+                                    JSON.stringify([source.url, customReload]),
+                                  ) || [],
+                                );
+                                setCustomCategoryId(null);
+                                setCustomPage(1);
+                              }}
+                            >
+                              <span>{source.name}</span>
+                              {source.url === customSource.url && (
+                                <Check size={16} />
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
                 {!customSource ? (
                   <div className="empty">
@@ -1289,27 +1395,6 @@ export default function App() {
                   </div>
                 ) : (
                   <>
-                    <div className="custom-source-bar">
-                      <label htmlFor="custom-source">点播源</label>
-                      <select
-                        id="custom-source"
-                        value={customSource.url}
-                        onChange={(event) => {
-                          const url = event.target.value;
-                          setCustomSourceUrl(url);
-                          saveStorage("custom-source-url", url);
-                          setCustomCategoryId(null);
-                          setCustomPage(1);
-                        }}
-                      >
-                        {enabledSources.map((source) => (
-                          <option key={source.url} value={source.url}>
-                            {source.name}
-                          </option>
-                        ))}
-                      </select>
-                      <small title={customSource.url}>{customSource.url}</small>
-                    </div>
                     {customCategoryError && (
                       <div className="notice error">
                         分类标签加载失败：{customCategoryError}{" "}
@@ -1347,7 +1432,13 @@ export default function App() {
                                     : ""
                                 }
                                 onClick={() => {
-                                  setCustomCategoryId(category.id);
+                                  // 父分类通常没有影片，直接进入它的第一个子标签。
+                                  const firstTag = customCategories.find(
+                                    (item) => item.parentId === category.id,
+                                  );
+                                  setCustomCategoryId(
+                                    firstTag?.id ?? category.id,
+                                  );
                                   setCustomPage(1);
                                 }}
                               >
