@@ -38,6 +38,18 @@ npm test
 安装包输出到 `release/`。字体文件随安装包提供，不需要启动时连接 Google Fonts。macOS 发布给其他电脑时，需要按 Apple 的要求签名和公证。首页数据和点播资源都依赖相应的第三方服务；个别线路失效时，可以在搜索结果中换源。接收设备需支持 DLNA 或 AirPlay 视频播放，且能访问电脑的局域网地址。
 Windows 安装包使用安装向导，可在安装时选择目录。
 推送到 `master`、提交 Pull Request 或在 GitHub Actions 中手动运行 `Build desktop installers`，会分别生成 Windows x64 安装包和 Apple Silicon（ARM64）macOS DMG，可在运行记录的 Artifacts 中下载。发布新版本时，先更新 `package.json` 的版本号，再推送对应的 `vX.Y.Z` 标签；两个安装包构建成功后会自动上传到 GitHub Releases。CI 产物未签名；向其他 Mac 分发前仍需配置 Apple 签名和公证。
+
+### macOS 未签名版本首次打开
+
+从本项目的 GitHub Releases 下载 DMG，把「影窗.app」拖入「应用程序」后，如果启动时提示应用「已损坏」，可在确认下载来源后打开终端执行：
+
+```bash
+sudo xattr -dr com.apple.quarantine "/Applications/影窗.app"
+open "/Applications/影窗.app"
+```
+
+这只移除该应用的下载隔离标记，不会给应用添加 Apple 签名。重新安装新版本后可能需要再次执行。
+
 Windows 安装版的 `settings.db` 位于实际安装目录（例如 `E:\mysoft\videoClient\settings.db`），该目录需要允许当前用户写入。安装新版本时，安装器会先备份旧数据库，再恢复到新安装目录；开发版和 macOS 仍使用系统用户数据目录。
 旧版 `localStorage` 和 `settings.json` 不会迁移到 SQLite，首次使用新版需要重新设置。
 AirPlay 投屏同样要求接收设备能访问电脑的局域网代理。投屏发送的是视频流，播放器上绘制的弹幕不会自动随视频一起投出；Apple TV 的实际兼容性仍需在对应 tvOS 设备上验证。
