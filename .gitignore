@@ -1,0 +1,11 @@
+node_modules/
+dist/
+release/
+release-*/
+output/
+.venv-airplay/
+build/airplay/
+build/pyinstaller/
+__pycache__/
+*.tsbuildinfo
+.DS_Store
