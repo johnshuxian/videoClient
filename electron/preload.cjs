@@ -9,6 +9,10 @@ contextBridge.exposeInMainWorld("videoAPI", {
   },
   catalog: (type, tag, page, sort) =>
     ipcRenderer.invoke("catalog", type, tag, page, sort),
+  sourceCategories: (sourceUrl) =>
+    ipcRenderer.invoke("source:categories", sourceUrl),
+  sourceCatalog: (source, categoryId, page) =>
+    ipcRenderer.invoke("source:catalog", source, categoryId, page),
   importSources: (url) => ipcRenderer.invoke("sources:import", url),
   testSource: (source, runId) =>
     ipcRenderer.invoke("source:test", source, runId),

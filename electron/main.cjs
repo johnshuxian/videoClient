@@ -426,6 +426,57 @@ ipcMain.handle("catalog", async (_, type, tag, page, sort) => {
   return items;
 });
 
+ipcMain.handle("source:categories", async (_, sourceUrl) => {
+  const url = new URL(sourceUrl);
+  if (!["http:", "https:"].includes(url.protocol))
+    throw new Error("点播源地址无效");
+  // Apple CMS 基础列表附带 class，分类筛选使用其中的 type_id。
+  const data = await (await fetchWithTimeout(url, 12000)).json();
+  if (!Array.isArray(data.class)) throw new Error("该点播源未返回分类标签");
+  return data.class
+    .map((entry) => ({
+      id: Number(entry.type_id),
+      name: String(entry.type_name || "").trim(),
+      parentId: Number(entry.type_pid) || 0,
+    }))
+    .filter(
+      (entry) => Number.isInteger(entry.id) && entry.id > 0 && entry.name,
+    );
+});
+
+ipcMain.handle("source:catalog", async (_, source, categoryId, page) => {
+  const url = new URL(source.url);
+  if (!["http:", "https:"].includes(url.protocol))
+    throw new Error("点播源地址无效");
+  url.searchParams.set("ac", "videolist");
+  url.searchParams.set("pg", String(Math.max(1, Number(page) || 1)));
+  if (categoryId !== null) url.searchParams.set("t", String(categoryId));
+  const data = await (await fetchWithTimeout(url, 12000)).json();
+  // 空分类在部分 Apple CMS 源中以 list:null 表示，按空列表展示。
+  if (
+    !Array.isArray(data.list) &&
+    !(data.list == null && Number(data.total) === 0)
+  )
+    throw new Error("点播源未返回影片列表");
+  return {
+    items: (data.list || [])
+      .filter((vod) => vod?.vod_id != null && vod.vod_name)
+      .map((vod) => ({
+        id: String(vod.vod_id),
+        title: vod.vod_name,
+        poster: vod.vod_pic || "",
+        year: vod.vod_year || "",
+        remarks: vod.vod_remarks || "",
+        source: source.name,
+        sourceUrl: source.url,
+        type: vod.type_name || "",
+        rating: vod.vod_score || "",
+        updatedAt: vod.vod_time || "",
+      })),
+    pageCount: Number(data.pagecount) || 0,
+  };
+});
+
 ipcMain.handle("sources:import", async (_, address) => {
   const url = new URL(String(address).trim());
   if (!["http:", "https:"].includes(url.protocol))

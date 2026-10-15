@@ -10,6 +10,7 @@ import {
   Clapperboard,
   Film,
   History,
+  ListFilter,
   LoaderCircle,
   MonitorPlay,
   Play,
@@ -33,6 +34,7 @@ import type {
   HistoryItem,
   SearchItem,
   Source,
+  SourceCategory,
   SourceHealth,
   VodDetail,
 } from "./types";
@@ -260,7 +262,9 @@ function Player({
 }
 
 export default function App() {
-  const [section, setSection] = useState<"home" | "search" | "history">("home");
+  const [section, setSection] = useState<
+    "home" | "custom" | "search" | "history"
+  >("home");
   const [type, setType] = useState<CatalogType>("movie");
   const [tag, setTag] = useState("热门");
   const [animeSort, setAnimeSort] = useState<"rank" | "date" | "heat">("rank");
@@ -276,6 +280,20 @@ export default function App() {
   const [enabled, setEnabled] = useState<string[]>(
     readStorage("vod-enabled", []),
   );
+  const [customSourceUrl, setCustomSourceUrl] = useState(
+    readStorage("custom-source-url", ""),
+  );
+  const [customCategories, setCustomCategories] = useState<SourceCategory[]>(
+    [],
+  );
+  const [customCategoryId, setCustomCategoryId] = useState<number | null>(null);
+  const [customPage, setCustomPage] = useState(1);
+  const [customPageCount, setCustomPageCount] = useState(0);
+  const [customItems, setCustomItems] = useState<SearchItem[]>([]);
+  const [customLoading, setCustomLoading] = useState(false);
+  const [customError, setCustomError] = useState("");
+  const [customCategoryError, setCustomCategoryError] = useState("");
+  const [customReload, setCustomReload] = useState(0);
   const [subscriptionUrl, setSubscriptionUrl] = useState(
     readStorage("vod-subscription-url", ""),
   );
@@ -325,7 +343,7 @@ export default function App() {
   const searchSerial = useRef(0);
   // 返回搜索前的列表时，保留分类和原来的浏览位置。
   const searchOrigin = useRef<{
-    section: "home" | "history";
+    section: "home" | "custom" | "history";
     scrollTop: number;
   }>({ section: "home", scrollTop: 0 });
   const restoreScroll = useRef<number | null>(null);
@@ -334,6 +352,19 @@ export default function App() {
   const progressSaved = useRef(0);
   const pageScroll = useRef<HTMLDivElement>(null);
   const casting = castingDevice?.name || "";
+  const enabledSources = sources.filter(
+    (source) => enabled.includes(source.url) && !source.isAdult,
+  );
+  const customSource =
+    enabledSources.find((source) => source.url === customSourceUrl) ||
+    enabledSources[0];
+
+  useEffect(() => {
+    if (customSource && customSource.url !== customSourceUrl) {
+      setCustomSourceUrl(customSource.url);
+      saveStorage("custom-source-url", customSource.url);
+    }
+  }, [customSource?.url, customSourceUrl]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -372,6 +403,53 @@ export default function App() {
       cancelled = true;
     };
   }, [type, tag, page, animeSort, catalogReload]);
+
+  useEffect(() => {
+    if (section !== "custom" || !customSource) return;
+    let cancelled = false;
+    setCustomCategories([]);
+    setCustomCategoryError("");
+    window.videoAPI
+      .sourceCategories(customSource.url)
+      .then((items) => {
+        if (!cancelled) setCustomCategories(items);
+      })
+      .catch((error) => {
+        if (!cancelled) setCustomCategoryError(error.message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [section, customSource?.url, customReload]);
+
+  useEffect(() => {
+    if (section !== "custom" || !customSource) return;
+    let cancelled = false;
+    setCustomLoading(true);
+    setCustomError("");
+    if (customPage === 1) setCustomItems([]);
+    window.videoAPI
+      .sourceCatalog(customSource, customCategoryId, customPage)
+      .then(({ items, pageCount }) => {
+        if (cancelled) return;
+        setCustomItems((previous) => {
+          if (customPage === 1) return items;
+          // 从详情或搜索返回时会重取当前页，避免把同一批资源重复追加。
+          const seen = new Set(previous.map((item) => item.id));
+          return [...previous, ...items.filter((item) => !seen.has(item.id))];
+        });
+        setCustomPageCount(pageCount);
+      })
+      .catch((error) => {
+        if (!cancelled) setCustomError(error.message);
+      })
+      .finally(() => {
+        if (!cancelled) setCustomLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [section, customSource?.url, customCategoryId, customPage, customReload]);
 
   useEffect(
     () =>
@@ -829,6 +907,19 @@ export default function App() {
         (item) => item.key === `${selected.sourceUrl}:${selected.id}`,
       )
     : undefined;
+  const selectedCustomCategory = customCategories.find(
+    (category) => category.id === customCategoryId,
+  );
+  const activeCustomParentId =
+    selectedCustomCategory?.parentId || selectedCustomCategory?.id;
+  const customRootCategories = customCategories.filter(
+    (category) =>
+      category.parentId === 0 ||
+      !customCategories.some((parent) => parent.id === category.parentId),
+  );
+  const customChildCategories = customCategories.filter(
+    (category) => category.parentId === activeCustomParentId,
+  );
 
   return (
     <div className={`app-shell ${theme} platform-${window.videoAPI.platform}`}>
@@ -897,6 +988,15 @@ export default function App() {
           onClick={() => changeType("variety")}
         >
           <Clapperboard size={19} /> 综艺
+        </button>
+        <button
+          className={`nav-item ${section === "custom" ? "active" : ""}`}
+          onClick={() => {
+            setSection("custom");
+            setSelected(null);
+          }}
+        >
+          <ListFilter size={19} /> 自定义
         </button>
         <div className="nav-caption library-caption">我的片单</div>
         <button
@@ -1163,6 +1263,196 @@ export default function App() {
                     )}
                 </section>
               </>
+            )}
+
+            {section === "custom" && (
+              <section className="results-section custom-section">
+                <div className="section-heading">
+                  <div>
+                    <span className="section-kicker">YOUR VOD SOURCES</span>
+                    <h2>
+                      自定义 <span>点播源最近更新</span>
+                    </h2>
+                  </div>
+                </div>
+                {!customSource ? (
+                  <div className="empty">
+                    <ListFilter size={38} />
+                    <h3>还没有启用的点播源</h3>
+                    <p>在播放设置中导入并启用点播源后，可浏览最近更新。</p>
+                    <button
+                      className="primary-button"
+                      onClick={() => setSettingsOpen(true)}
+                    >
+                      打开播放设置
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="custom-source-bar">
+                      <label htmlFor="custom-source">点播源</label>
+                      <select
+                        id="custom-source"
+                        value={customSource.url}
+                        onChange={(event) => {
+                          const url = event.target.value;
+                          setCustomSourceUrl(url);
+                          saveStorage("custom-source-url", url);
+                          setCustomCategoryId(null);
+                          setCustomPage(1);
+                        }}
+                      >
+                        {enabledSources.map((source) => (
+                          <option key={source.url} value={source.url}>
+                            {source.name}
+                          </option>
+                        ))}
+                      </select>
+                      <small title={customSource.url}>{customSource.url}</small>
+                    </div>
+                    {customCategoryError && (
+                      <div className="notice error">
+                        分类标签加载失败：{customCategoryError}{" "}
+                        <button
+                          onClick={() =>
+                            setCustomReload((previous) => previous + 1)
+                          }
+                        >
+                          重试
+                        </button>
+                      </div>
+                    )}
+                    {customCategories.length > 0 && (
+                      <div className="custom-filters">
+                        <div className="custom-filter-line">
+                          <span>分类</span>
+                          <div className="tag-list">
+                            <button
+                              className={
+                                customCategoryId === null ? "active" : ""
+                              }
+                              onClick={() => {
+                                setCustomCategoryId(null);
+                                setCustomPage(1);
+                              }}
+                            >
+                              全部
+                            </button>
+                            {customRootCategories.map((category) => (
+                              <button
+                                key={category.id}
+                                className={
+                                  activeCustomParentId === category.id
+                                    ? "active"
+                                    : ""
+                                }
+                                onClick={() => {
+                                  setCustomCategoryId(category.id);
+                                  setCustomPage(1);
+                                }}
+                              >
+                                {category.name}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        {customChildCategories.length > 0 && (
+                          <div className="custom-filter-line">
+                            <span>标签</span>
+                            <div className="tag-list">
+                              {customChildCategories.map((category) => (
+                                <button
+                                  key={category.id}
+                                  className={
+                                    customCategoryId === category.id
+                                      ? "active"
+                                      : ""
+                                  }
+                                  onClick={() => {
+                                    setCustomCategoryId(category.id);
+                                    setCustomPage(1);
+                                  }}
+                                >
+                                  {category.name}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {customError && (
+                      <div className="notice error">
+                        最近更新加载失败：{customError}{" "}
+                        <button
+                          onClick={() =>
+                            setCustomReload((previous) => previous + 1)
+                          }
+                        >
+                          重试
+                        </button>
+                      </div>
+                    )}
+                    <div className="poster-grid">
+                      {customItems.map((item) => (
+                        <button
+                          className="poster-card"
+                          key={`${item.sourceUrl}:${item.id}`}
+                          onClick={() => openDetail(item)}
+                        >
+                          <div className="poster-image">
+                            <PosterImage
+                              src={item.poster}
+                              alt={`${item.title}海报`}
+                            />
+                            <span className="poster-play">
+                              <Play size={24} fill="currentColor" />
+                            </span>
+                            {item.rating && item.rating !== "0.0" && (
+                              <span className="rating">★ {item.rating}</span>
+                            )}
+                          </div>
+                          <div className="poster-info custom-poster-info">
+                            <strong title={item.title}>{item.title}</strong>
+                            <small title={`${item.type} ${item.remarks}`}>
+                              {[item.type, item.remarks]
+                                .filter(Boolean)
+                                .join(" · ") || "暂无更新说明"}
+                            </small>
+                            {item.updatedAt && <small>{item.updatedAt}</small>}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                    {customLoading && (
+                      <div className="loading">
+                        <LoaderCircle className="spin" size={20} />{" "}
+                        正在加载最近更新...
+                      </div>
+                    )}
+                    {!customLoading &&
+                      !customError &&
+                      customItems.length === 0 && (
+                        <div className="empty">
+                          <Film size={36} />
+                          <h3>这个分类暂无资源</h3>
+                          <p>可以切换标签或点播源。</p>
+                        </div>
+                      )}
+                    {!customLoading &&
+                      !customError &&
+                      customItems.length > 0 &&
+                      customPage < customPageCount && (
+                        <button
+                          className="load-more"
+                          onClick={() => setCustomPage(customPage + 1)}
+                        >
+                          加载更多 <ChevronDown size={16} />
+                        </button>
+                      )}
+                  </>
+                )}
+              </section>
             )}
 
             {section === "search" && (

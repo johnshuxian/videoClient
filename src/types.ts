@@ -13,6 +13,11 @@ export type SourceHealth = {
   resultCount: number;
   error?: string;
 };
+export type SourceCategory = {
+  id: number;
+  name: string;
+  parentId: number;
+};
 export type SearchItem = {
   id: string;
   title: string;
@@ -23,6 +28,7 @@ export type SearchItem = {
   sourceUrl: string;
   type: string;
   rating: string;
+  updatedAt?: string;
 };
 export type Episode = { label: string; url: string };
 export type VodDetail = {
@@ -64,6 +70,12 @@ declare global {
         page: number,
         sort: "rank" | "date" | "heat",
       ) => Promise<CatalogItem[]>;
+      sourceCategories: (sourceUrl: string) => Promise<SourceCategory[]>;
+      sourceCatalog: (
+        source: Source,
+        categoryId: number | null,
+        page: number,
+      ) => Promise<{ items: SearchItem[]; pageCount: number }>;
       importSources: (url: string) => Promise<Source[]>;
       testSource: (source: Source, runId: number) => Promise<SourceHealth>;
       cancelSourceTest: (runId: number) => void;
