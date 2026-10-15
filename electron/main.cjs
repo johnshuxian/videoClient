@@ -18,6 +18,7 @@ const token = crypto.randomBytes(24).toString("hex");
 const catalogCache = new Map();
 const imageCache = new Map();
 const sourceTestRuns = new Map();
+let activeSearch;
 let proxyPort = 0;
 let currentCast = null;
 let mainWindow;
@@ -411,20 +412,32 @@ ipcMain.handle("image-url", (_, input) => {
 });
 
 ipcMain.handle("search", async (event, query, enabled, requestId) => {
+  activeSearch?.abort();
+  const controller = new AbortController();
+  activeSearch = controller;
   const sources = (Array.isArray(enabled) ? enabled : []).filter(
     (source) => source && !source.isAdult && /^https?:\/\//i.test(source.url),
   );
   const trimmed = String(query).trim().slice(0, 60);
-  if (!trimmed) return { results: [], failed: [] };
+  if (!trimmed) {
+    activeSearch = null;
+    return { results: [], failed: [] };
+  }
   let completed = 0;
-  const settled = await Promise.allSettled(
+  const results = [];
+  const failed = [];
+  await Promise.all(
     sources.map(async (source) => {
+      let items = [];
+      let failedSource;
       try {
         const url = new URL(source.url);
         url.searchParams.set("ac", "videolist");
         url.searchParams.set("wd", trimmed);
-        const data = await (await fetchWithTimeout(url, 8500)).json();
-        return (Array.isArray(data.list) ? data.list : [])
+        const data = await (
+          await fetchWithTimeout(url, 8500, {}, controller.signal)
+        ).json();
+        items = (Array.isArray(data.list) ? data.list : [])
           .map((item) => ({
             id: String(item.vod_id),
             title: item.vod_name,
@@ -437,25 +450,29 @@ ipcMain.handle("search", async (event, query, enabled, requestId) => {
             rating: item.vod_score || "",
           }))
           .filter((item) => item.title && item.id);
+        if (!controller.signal.aborted) results.push(...items);
+      } catch {
+        if (!controller.signal.aborted) {
+          failedSource = source.name;
+          failed.push(source.name);
+        }
       } finally {
-        // 成功或失败都算完成一个源；请求编号用于区分连续发起的搜索。
-        completed += 1;
-        event.sender.send("search:progress", {
-          requestId,
-          completed,
-          total: sources.length,
-        });
+        if (!controller.signal.aborted && !event.sender.isDestroyed()) {
+          // 每个源完成后立即发送结果；慢源不再阻挡已找到的影片。
+          completed += 1;
+          event.sender.send("search:progress", {
+            requestId,
+            completed,
+            total: sources.length,
+            items,
+            failedSource,
+          });
+        }
       }
     }),
   );
-  return {
-    results: settled.flatMap((item) =>
-      item.status === "fulfilled" ? item.value : [],
-    ),
-    failed: settled.flatMap((item, index) =>
-      item.status === "rejected" ? [sources[index].name] : [],
-    ),
-  };
+  if (activeSearch === controller) activeSearch = null;
+  return { results, failed };
 });
 
 ipcMain.handle("detail", async (_, sourceUrl, id) => {

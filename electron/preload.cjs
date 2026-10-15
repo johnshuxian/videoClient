@@ -16,7 +16,12 @@ contextBridge.exposeInMainWorld("videoAPI", {
   search: (query, sources, requestId, onProgress) => {
     const listener = (_, progress) => {
       if (progress.requestId === requestId)
-        onProgress(progress.completed, progress.total);
+        onProgress(
+          progress.completed,
+          progress.total,
+          progress.items,
+          progress.failedSource,
+        );
     };
     ipcRenderer.on("search:progress", listener);
     return ipcRenderer

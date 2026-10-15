@@ -69,7 +69,12 @@ declare global {
         query: string,
         sources: Source[],
         requestId: number,
-        onProgress: (completed: number, total: number) => void,
+        onProgress: (
+          completed: number,
+          total: number,
+          items: SearchItem[],
+          failedSource?: string,
+        ) => void,
       ) => Promise<{ results: SearchItem[]; failed: string[] }>;
       detail: (sourceUrl: string, id: string) => Promise<VodDetail>;
       streamUrl: (url: string, filterAds: boolean) => Promise<string>;

@@ -317,9 +317,30 @@ export default function App() {
         term,
         selectedSources,
         serial,
-        (completed, total) => {
-          if (serial === searchSerial.current)
-            setSearchProgress(Math.round((completed / total) * 100));
+        (completed, total, items, failedSource) => {
+          if (serial !== searchSerial.current) return;
+          setSearchProgress(Math.round((completed / total) * 100));
+          if (items.length > 0)
+            setResults((previous) => {
+              const known = new Set(
+                previous.map((item) => `${item.sourceUrl}:${item.id}`),
+              );
+              return [
+                ...previous,
+                ...items.filter((item) => {
+                  const key = `${item.sourceUrl}:${item.id}`;
+                  if (known.has(key)) return false;
+                  known.add(key);
+                  return true;
+                }),
+              ];
+            });
+          if (failedSource)
+            setFailed((previous) =>
+              previous.includes(failedSource)
+                ? previous
+                : [...previous, failedSource],
+            );
         },
       );
       if (serial === searchSerial.current) {
@@ -808,7 +829,9 @@ export default function App() {
                   <h2>
                     “{searched}” 的搜索结果{" "}
                     <span>
-                      {searchLoading ? "搜索中..." : `共 ${results.length} 条`}
+                      {searchLoading
+                        ? `已找到 ${results.length} 条 · 搜索中...`
+                        : `共 ${results.length} 条`}
                     </span>
                   </h2>
                 </div>
@@ -823,7 +846,7 @@ export default function App() {
                   {failed.length > 6 ? "…" : ""}
                 </div>
               )}
-              {searchLoading && (
+              {searchLoading && results.length === 0 && (
                 <div className="search-wait" role="status" aria-live="polite">
                   <div className="search-wait-card">
                     <div className="search-wait-symbol" aria-hidden="true">
@@ -845,6 +868,15 @@ export default function App() {
                       <span style={{ width: `${searchProgress}%` }} />
                     </div>
                     <small>搜索结果即将呈现</small>
+                  </div>
+                </div>
+              )}
+              {searchLoading && results.length > 0 && (
+                <div className="search-progress-inline" role="status">
+                  <span>继续搜索其他点播源</span>
+                  <b>{searchProgress}%</b>
+                  <div className="search-progress">
+                    <span style={{ width: `${searchProgress}%` }} />
                   </div>
                 </div>
               )}
