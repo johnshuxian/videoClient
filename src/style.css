@@ -1,9 +1,24 @@
-@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700;800&display=swap");
+/* 字体随安装包提供，启动时不再等待 Google Fonts 网络请求。 */
+@font-face {
+  font-family: "DM Sans";
+  src: url("./assets/fonts/DMSans-variable.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 100 1000;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Noto Sans SC";
+  src: url("./assets/fonts/NotoSansSC-variable.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
 
 :root {
-  font-family: "DM Sans", "Noto Sans SC", sans-serif;
-  color: #eaf2fa;
-  background: #0b101a;
+  font-family: "DM Sans", "Noto Sans SC", "PingFang SC", "Microsoft YaHei",
+    sans-serif;
+  color: #172b3c;
+  background: #edf3f7;
   font-synthesis: none;
   /* 页面内容切换时仍保留滚动条位置，避免顶栏搜索框横向跳动。 */
   scrollbar-gutter: stable;
@@ -1476,6 +1491,10 @@ a {
 :root[data-theme="light"] {
   color: #172b3c;
   background: #edf3f7;
+}
+:root[data-theme="dark"] {
+  color: #eaf2fa;
+  background: #0b101a;
 }
 .app-shell.light,
 .light .detail-overlay {

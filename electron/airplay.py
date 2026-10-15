@@ -7,7 +7,6 @@ lines on stdin/stdout; diagnostics go to stderr.
 
 import asyncio
 import json
-import os
 import sys
 
 import pyatv
@@ -15,12 +14,7 @@ from pyatv.const import PairingRequirement, Protocol
 from pyatv.protocols.airplay.utils import AirPlayFlags, parse_features
 
 
-credentials_path = sys.argv[1]
-try:
-    with open(credentials_path, encoding="utf-8") as file:
-        credentials = json.load(file)
-except FileNotFoundError:
-    credentials = {}
+credentials = {}
 
 devices = {}
 pairing = None
@@ -49,10 +43,12 @@ async def stop_playback():
 
 
 async def handle(command):
-    global devices, pairing, pairing_id, player, play_task
+    global credentials, devices, pairing, pairing_id, player, play_task
     action = command["action"]
 
     if action == "scan":
+        # Electron 从 SQLite 读取配对信息，通过进程管道交给助手，不再写独立 JSON 文件。
+        credentials = command.get("credentials", {})
         found = await pyatv.scan(asyncio.get_running_loop(), timeout=3, protocol=Protocol.AirPlay)
         devices = {}
         result = []
@@ -99,12 +95,7 @@ async def handle(command):
             if not pairing.has_paired:
                 raise RuntimeError("AirPlay 配对失败")
             credentials[pairing_id] = pairing.service.credentials
-            os.makedirs(os.path.dirname(credentials_path), exist_ok=True)
-            with open(credentials_path, "w", encoding="utf-8") as file:
-                json.dump(credentials, file)
-            if os.name != "nt":
-                os.chmod(credentials_path, 0o600)
-            return True
+            return {"id": pairing_id, "credentials": credentials[pairing_id]}
         finally:
             await pairing.close()
             pairing = None

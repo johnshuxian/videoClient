@@ -54,6 +54,8 @@ declare global {
   interface Window {
     videoAPI: {
       platform: string;
+      readSetting: (key: string) => unknown;
+      saveSetting: (key: string, value: unknown) => void;
       catalog: (
         type: "movie" | "tv",
         tag: string,

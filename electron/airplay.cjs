@@ -20,14 +20,10 @@ function requestAirPlay(action, data = {}) {
       throw new Error(
         "缺少 AirPlay 助手；开发环境请先运行 npm run build:airplay",
       );
-    helper = spawn(
-      executable,
-      [path.join(app.getPath("userData"), "airplay-credentials.json")],
-      {
-        windowsHide: true,
-        stdio: ["pipe", "pipe", "pipe"],
-      },
-    );
+    helper = spawn(executable, [], {
+      windowsHide: true,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
     readline.createInterface({ input: helper.stdout }).on("line", (line) => {
       let message;
       try {

@@ -2,6 +2,11 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("videoAPI", {
   platform: process.platform,
+  readSetting: (key) => ipcRenderer.sendSync("settings:read", key),
+  saveSetting: (key, value) => {
+    const error = ipcRenderer.sendSync("settings:save", key, value);
+    if (error) throw new Error(error);
+  },
   catalog: (type, tag, page) => ipcRenderer.invoke("catalog", type, tag, page),
   importSources: (url) => ipcRenderer.invoke("sources:import", url),
   testSource: (source, runId) =>

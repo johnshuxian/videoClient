@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
 const path = require("node:path");
 const http = require("node:http");
 const os = require("node:os");
@@ -7,6 +7,7 @@ const { Readable } = require("node:stream");
 const { pipeline } = require("node:stream/promises");
 const { parseEpisodes, rewriteManifest } = require("./media.cjs");
 const { requestAirPlay, closeAirPlay } = require("./airplay.cjs");
+const { createSettingsStore } = require("./settings.cjs");
 
 const requestHeaders = {
   "User-Agent":
@@ -20,6 +21,9 @@ const sourceTestRuns = new Map();
 let proxyPort = 0;
 let currentCast = null;
 let mainWindow;
+let settingsStore;
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) app.quit();
 
 async function stopCurrentCast() {
   if (!currentCast) return;
@@ -200,12 +204,12 @@ function createWindow() {
     minWidth: 900,
     minHeight: 620,
     title: "影窗",
-    backgroundColor: "#0b101a",
+    backgroundColor: "#f5f8fc",
     titleBarStyle: "hidden",
     titleBarOverlay:
       process.platform === "darwin"
         ? false
-        : { color: "#0b101a", symbolColor: "#aab6c7", height: 44 },
+        : { color: "#f5f8fc", symbolColor: "#31465a", height: 44 },
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -226,21 +230,57 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(async () => {
-  await new Promise((resolve) => proxyServer.listen(0, "0.0.0.0", resolve));
-  proxyPort = proxyServer.address().port;
-  createWindow();
+app.whenReady()
+  .then(async () => {
+    if (!hasSingleInstanceLock) return;
+    // Windows 安装版把数据库放在实际的 exe 所在目录；开发版与 macOS 仍使用用户数据目录。
+    const settingsDirectory =
+      process.platform === "win32" && app.isPackaged
+        ? path.dirname(app.getPath("exe"))
+        : app.getPath("userData");
+    settingsStore = createSettingsStore(settingsDirectory);
+    await new Promise((resolve) => proxyServer.listen(0, "0.0.0.0", resolve));
+    proxyPort = proxyServer.address().port;
+    createWindow();
+  })
+  .catch((error) => {
+    dialog.showErrorBox("影窗启动失败", error.message);
+    app.quit();
+  });
+
+app.on("second-instance", () => {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
 });
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 app.on("before-quit", () => {
-  proxyServer.close();
+  if (proxyServer.listening) proxyServer.close();
+  settingsStore?.close();
   closeAirPlay();
 });
 app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  if (hasSingleInstanceLock && BrowserWindow.getAllWindows().length === 0)
+    createWindow();
+});
+
+ipcMain.on("settings:read", (event, key) => {
+  event.returnValue = settingsStore.get(key);
+});
+ipcMain.on("settings:save", (event, key, value) => {
+  try {
+    settingsStore.set(key, value);
+    event.returnValue = null;
+  } catch (error) {
+    event.returnValue = error.message;
+  }
 });
 
 ipcMain.handle("catalog", async (_, type, tag, page) => {
@@ -477,26 +517,40 @@ ipcMain.handle("devices", async () => {
       );
       return checked.filter(Boolean);
     })(),
-    requestAirPlay("scan"),
+    requestAirPlay("scan", {
+      credentials: settingsStore.get("airplay-credentials") || {},
+    }),
   ]);
   const warnings = [];
   if (dlna.status === "rejected") warnings.push(`DLNA：${dlna.reason.message}`);
   if (airplay.status === "rejected")
     warnings.push(`AirPlay：${airplay.reason.message}`);
-  return {
-    items: [
-      ...(dlna.status === "fulfilled" ? dlna.value : []),
-      ...(airplay.status === "fulfilled" ? airplay.value : []),
-    ],
-    warnings,
-  };
+  const items = [
+    ...(dlna.status === "fulfilled" ? dlna.value : []),
+    ...(airplay.status === "fulfilled" ? airplay.value : []),
+  ];
+  if (warnings.length < 2) settingsStore.set("devices", items);
+  return { items, warnings };
 });
 ipcMain.handle("airplay:pair-begin", (_, id) =>
   requestAirPlay("pair_begin", { id }),
 );
-ipcMain.handle("airplay:pair-finish", (_, pin) =>
-  requestAirPlay("pair_finish", { pin }),
-);
+ipcMain.handle("airplay:pair-finish", async (_, pin) => {
+  const result = await requestAirPlay("pair_finish", { pin });
+  settingsStore.set("airplay-credentials", {
+    ...(settingsStore.get("airplay-credentials") || {}),
+    [result.id]: result.credentials,
+  });
+  settingsStore.set(
+    "devices",
+    (settingsStore.get("devices") || []).map((device) =>
+      device.type === "airplay" && device.id === result.id
+        ? { ...device, paired: true }
+        : device,
+    ),
+  );
+  return true;
+});
 ipcMain.handle("cast", async (_, device, url, title, filterAds) => {
   const stream = proxyUrl(url, filterAds, getLanIp());
   await stopCurrentCast();

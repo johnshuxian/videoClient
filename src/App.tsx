@@ -60,15 +60,12 @@ const TV_TAGS = [
   "纪录片",
 ];
 function readStorage<T>(key: string, fallback: T): T {
-  try {
-    return JSON.parse(localStorage.getItem(key) || "") as T;
-  } catch {
-    return fallback;
-  }
+  const saved = window.videoAPI.readSetting(key);
+  return saved === undefined ? fallback : (saved as T);
 }
 
 function saveStorage(key: string, value: unknown) {
-  localStorage.setItem(key, JSON.stringify(value));
+  window.videoAPI.saveSetting(key, value);
 }
 
 function useProxyImage(original: string) {
@@ -231,7 +228,7 @@ export default function App() {
   const [tested, setTested] = useState(0);
   const [testStopped, setTestStopped] = useState(false);
   const [theme, setTheme] = useState<"dark" | "light">(
-    readStorage("color-theme", "dark"),
+    readStorage("color-theme", "light"),
   );
   const [filterAds, setFilterAds] = useState(readStorage("filter-ads", true));
   const [autoplay, setAutoplay] = useState(readStorage("autoplay", true));
@@ -251,7 +248,9 @@ export default function App() {
   const [detailError, setDetailError] = useState("");
   const [line, setLine] = useState(0);
   const [episode, setEpisode] = useState<number | null>(null);
-  const [devices, setDevices] = useState<Device[]>([]);
+  const [devices, setDevices] = useState<Device[]>(
+    readStorage("devices", []),
+  );
   const [castOpen, setCastOpen] = useState(false);
   const [castBusy, setCastBusy] = useState(false);
   const [castError, setCastError] = useState("");
@@ -505,7 +504,6 @@ export default function App() {
     setCastError("");
     setCastWarnings([]);
     setPairingDevice(null);
-    setDevices([]);
     try {
       const found = await window.videoAPI.devices();
       setDevices(found.items);
