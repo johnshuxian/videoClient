@@ -37,6 +37,7 @@ npm test
 
 安装包输出到 `release/`。字体文件随安装包提供，不需要启动时连接 Google Fonts。macOS 发布给其他电脑时，需要按 Apple 的要求签名和公证。首页数据和点播资源都依赖相应的第三方服务；个别线路失效时，可以在搜索结果中换源。接收设备需支持 DLNA 或 AirPlay 视频播放，且能访问电脑的局域网地址。
 Windows 安装包使用安装向导，可在安装时选择目录。
+推送到 `master`、提交 Pull Request 或在 GitHub Actions 中手动运行 `Build desktop installers`，会分别生成 Windows x64 安装包和 Apple Silicon（ARM64）macOS DMG。构建完成后，在对应运行记录的 Artifacts 中下载 `windows-x64` 或 `macos-arm64`。CI 产物未签名；向其他 Mac 分发前仍需配置 Apple 签名和公证。
 Windows 安装版的 `settings.db` 位于实际安装目录（例如 `E:\mysoft\videoClient\settings.db`），该目录需要允许当前用户写入。安装新版本时，安装器会先备份旧数据库，再恢复到新安装目录；开发版和 macOS 仍使用系统用户数据目录。
 旧版 `localStorage` 和 `settings.json` 不会迁移到 SQLite，首次使用新版需要重新设置。
 AirPlay 投屏同样要求接收设备能访问电脑的局域网代理。投屏发送的是视频流，播放器上绘制的弹幕不会自动随视频一起投出；Apple TV 的实际兼容性仍需在对应 tvOS 设备上验证。
