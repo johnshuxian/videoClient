@@ -2349,6 +2349,54 @@ a {
     font-size: 27px;
   }
 }
+/* 平板的 CSS 宽度小于物理像素宽度，使用更紧凑的横屏布局。 */
+body.android-body {
+  min-width: 0;
+}
+.platform-android .topbar,
+.platform-android .detail-toolbar {
+  -webkit-app-region: no-drag;
+}
+@media (max-width: 900px) {
+  .platform-android .sidebar {
+    width: 150px;
+    padding: 18px 8px 12px;
+  }
+  .platform-android .brand {
+    margin-bottom: 25px;
+  }
+  .platform-android .nav-item {
+    padding: 0 10px;
+    gap: 8px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .platform-android .library-caption {
+    margin-top: 20px;
+  }
+  .platform-android .topbar {
+    height: 60px;
+    padding: 0 16px;
+  }
+  .platform-android .content {
+    padding: 20px 16px 45px;
+  }
+  .platform-android .poster-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .platform-android .detail-content {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 18px;
+  }
+  .platform-android .detail-hero {
+    min-height: 0;
+    padding: 20px;
+  }
+  .platform-android .episode-panel {
+    width: 100%;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   *,
   *:before,

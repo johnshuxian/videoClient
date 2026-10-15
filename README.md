@@ -1,6 +1,6 @@
 # 影窗
 
-Windows / macOS 桌面点播客户端。电影、电视剧和综艺推荐来自豆瓣，番剧榜单来自 Bangumi。初次安装不内置点播源，需要在「播放设置」中粘贴 VOD 订阅地址并导入，例如[这份 vod.json 源清单](https://raw.githubusercontent.com/johnshuxian/IPTVM3U/refs/heads/master/vod.json)。
+Windows / macOS 桌面与 Android 平板点播客户端。电影、电视剧和综艺推荐来自豆瓣，番剧榜单来自 Bangumi。初次安装不内置点播源，需要在「播放设置」中粘贴 VOD 订阅地址并导入，例如[这份 vod.json 源清单](https://raw.githubusercontent.com/johnshuxian/IPTVM3U/refs/heads/master/vod.json)。
 
 ## 功能
 
@@ -34,6 +34,14 @@ npm run dist:win  # 在 Windows 上生成 NSIS 安装包
 npm run dist:mac  # 在 macOS 上生成 DMG
 npm test
 ```
+
+Android 平板版需要 JDK 21、Android SDK Platform 36 和 Build Tools 35.0.0。在 Windows 上运行：
+
+```bash
+npm run dist:android
+```
+
+调试签名 APK 输出到 `android/app/build/outputs/apk/debug/app-debug.apk`，可直接安装到 Android 平板。平板版在原生 SQLite 中保存设置和播放记录，界面固定横屏，点播源、搜索、详情和本机播放可用；DLNA / AirPlay 投屏目前仅支持桌面版。桌面版数据库不会自动同步到平板，首次使用需重新导入点播源。Android 16 起大屏方向规则变化，工程将目标 API 固定为 35 以维持横屏模式。
 
 安装包输出到 `release/`。字体文件随安装包提供，不需要启动时连接 Google Fonts。macOS 发布给其他电脑时，需要按 Apple 的要求签名和公证。首页数据和点播资源都依赖相应的第三方服务；个别线路失效时，可以在搜索结果中换源。接收设备需支持 DLNA 或 AirPlay 视频播放，且能访问电脑的局域网地址。
 Windows 安装包使用安装向导，可在安装时选择目录。

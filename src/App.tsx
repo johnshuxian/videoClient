@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import Artplayer from "artplayer";
 import Hls from "hls.js";
+import { App as CapacitorApp } from "@capacitor/app";
 import {
   ArrowLeft,
   ArrowRight,
@@ -362,6 +363,34 @@ export default function App() {
   const customSource =
     enabledSources.find((source) => source.url === customSourceUrl) ||
     enabledSources[0];
+
+  useEffect(() => {
+    if (window.videoAPI.platform !== "android") return;
+    let active = true;
+    let remove: (() => void) | undefined;
+    CapacitorApp.addListener("backButton", () => {
+      if (sourceFormatOpen) setSourceFormatOpen(false);
+      else if (settingsOpen) setSettingsOpen(false);
+      else if (customSourceOpen) setCustomSourceOpen(false);
+      else if (selected) {
+        ++detailSerial.current;
+        setSelected(null);
+        setDetail(null);
+        setEpisode(null);
+      } else if (section === "search") {
+        restoreScroll.current = searchOrigin.current.scrollTop;
+        setSection(searchOrigin.current.section);
+      } else if (section !== "home") setSection("home");
+      else CapacitorApp.exitApp();
+    }).then((listener) => {
+      if (active) remove = () => listener.remove();
+      else listener.remove();
+    });
+    return () => {
+      active = false;
+      remove?.();
+    };
+  }, [sourceFormatOpen, settingsOpen, customSourceOpen, selected, section]);
 
   useEffect(() => {
     if (customSource && customSource.url !== customSourceUrl) {
@@ -1874,9 +1903,11 @@ export default function App() {
                             </div>
                             {!casting && (
                               <div className="player-actions">
-                                <button onClick={scanDevices}>
-                                  <MonitorPlay size={17} /> 投屏
-                                </button>
+                                {window.videoAPI.platform !== "android" && (
+                                  <button onClick={scanDevices}>
+                                    <MonitorPlay size={17} /> 投屏
+                                  </button>
+                                )}
                                 {episode + 1 <
                                   detail.lines[line].episodes.length && (
                                   <button
