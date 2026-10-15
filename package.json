@@ -1,6 +1,6 @@
 {
   "name": "videoclient",
-  "version": "0.2.11",
+  "version": "0.2.14",
   "private": true,
   "description": "Windows and macOS VOD desktop player",
   "main": "electron/main.cjs",
@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@sonn-audio/node-upnp": "^0.4.2",
+    "artplayer": "^5.4.0",
     "hls.js": "^1.7.3",
     "lucide-react": "^0.468.0",
     "react": "^19.2.0",
@@ -62,7 +63,8 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "include": "build/installer.nsh"
     },
     "mac": {
       "target": [

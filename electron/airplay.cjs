@@ -7,6 +7,7 @@ const { app } = require("electron");
 let helper = null;
 let serial = 0;
 const pending = new Map();
+let eventHandler = () => {};
 
 function requestAirPlay(action, data = {}) {
   if (!helper) {
@@ -31,10 +32,14 @@ function requestAirPlay(action, data = {}) {
       } catch {
         return;
       }
-      const waiting = pending.get(message.id);
+      if (message.event) {
+        eventHandler(message);
+        return;
+      }
+      const waiting = pending.get(message.requestId);
       if (!waiting) return;
       clearTimeout(waiting.timer);
-      pending.delete(message.id);
+      pending.delete(message.requestId);
       if (message.error) waiting.reject(new Error(message.error));
       else waiting.resolve(message.result);
     });
@@ -59,7 +64,10 @@ function requestAirPlay(action, data = {}) {
       action === "scan" ? 12000 : 20000,
     );
     pending.set(id, { resolve, reject, timer });
-    helper.stdin.write(`${JSON.stringify({ id, action, ...data })}\n`);
+    // 请求编号与 Apple TV 的设备 ID 必须分开，否则配对回包无法匹配等待中的请求。
+    helper.stdin.write(
+      `${JSON.stringify({ requestId: id, action, ...data })}\n`,
+    );
   });
 }
 
@@ -67,4 +75,8 @@ function closeAirPlay() {
   helper?.kill();
 }
 
-module.exports = { requestAirPlay, closeAirPlay };
+function setAirPlayEventHandler(handler) {
+  eventHandler = handler;
+}
+
+module.exports = { requestAirPlay, closeAirPlay, setAirPlayEventHandler };

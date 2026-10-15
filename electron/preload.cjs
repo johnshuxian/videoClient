@@ -7,7 +7,8 @@ contextBridge.exposeInMainWorld("videoAPI", {
     const error = ipcRenderer.sendSync("settings:save", key, value);
     if (error) throw new Error(error);
   },
-  catalog: (type, tag, page) => ipcRenderer.invoke("catalog", type, tag, page),
+  catalog: (type, tag, page, sort) =>
+    ipcRenderer.invoke("catalog", type, tag, page, sort),
   importSources: (url) => ipcRenderer.invoke("sources:import", url),
   testSource: (source, runId) =>
     ipcRenderer.invoke("source:test", source, runId),
@@ -37,6 +38,12 @@ contextBridge.exposeInMainWorld("videoAPI", {
   cast: (device, url, title, filterAds) =>
     ipcRenderer.invoke("cast", device, url, title, filterAds),
   castStop: () => ipcRenderer.invoke("cast:stop"),
+  castProgress: () => ipcRenderer.invoke("cast:progress"),
+  onCastEnded: (callback) => {
+    const listener = (_, event) => callback(event);
+    ipcRenderer.on("cast:ended", listener);
+    return () => ipcRenderer.removeListener("cast:ended", listener);
+  },
   setTheme: (theme) => ipcRenderer.send("theme:set", theme),
   minimize: () => ipcRenderer.send("window:minimize"),
   maximize: () => ipcRenderer.send("window:maximize"),

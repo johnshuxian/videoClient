@@ -15,18 +15,11 @@
 }
 
 :root {
-  font-family: "DM Sans", "Noto Sans SC", "PingFang SC", "Microsoft YaHei",
-    sans-serif;
+  font-family:
+    "DM Sans", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
   color: #172b3c;
   background: #edf3f7;
   font-synthesis: none;
-  /* 页面内容切换时仍保留滚动条位置，避免顶栏搜索框横向跳动。 */
-  scrollbar-gutter: stable;
-}
-/* 打开详情页时锁住底层页面，避免窗口边缘露出无法控制详情内容的滚动条。 */
-:root:has(.detail-overlay) {
-  overflow: hidden;
-  scrollbar-gutter: auto;
 }
 * {
   box-sizing: border-box;
@@ -34,6 +27,14 @@
 body {
   margin: 0;
   min-width: 900px;
+  /* 页面是桌面应用界面，普通文案不允许划词；输入框仍可编辑。 */
+  -webkit-user-select: none;
+  user-select: none;
+}
+input,
+textarea {
+  -webkit-user-select: text;
+  user-select: text;
 }
 button,
 input {
@@ -60,12 +61,13 @@ a {
   text-decoration: none;
 }
 #root {
-  min-height: 100vh;
+  height: 100vh;
 }
 .app-shell {
-  min-height: 100vh;
+  height: 100vh;
   display: flex;
   background: #0b101a;
+  overflow: hidden;
 }
 .sidebar {
   width: 224px;
@@ -144,7 +146,6 @@ a {
 .nav-item.active {
   box-shadow: inset 3px 0 #d6bb8a;
 }
-.nav-arrow,
 .nav-count {
   margin-left: auto;
 }
@@ -177,24 +178,38 @@ a {
 .main-area {
   flex: 1;
   min-width: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 .topbar {
   height: 74px;
+  flex: none;
   padding: 0 38px;
   display: flex;
   align-items: center;
   gap: 24px;
   border-bottom: 1px solid #1a2735;
-  position: sticky;
-  top: 0;
+  position: relative;
   background: #0b101ae8;
   backdrop-filter: blur(18px);
   z-index: 5;
   -webkit-app-region: drag;
 }
 .platform-win32 .topbar {
-  /* Windows 原生窗口按钮占据右上角，工具按钮须避开这片区域。 */
+  /* 窗口按钮独立于顶栏，拖动层只覆盖按钮左侧。 */
   padding-right: 160px;
+  -webkit-app-region: no-drag;
+}
+.platform-win32 .topbar::before,
+.platform-win32 .detail-toolbar::before {
+  /* 覆盖顶栏的完整高度；点击穿透交给下方的搜索和返回按钮。 */
+  content: "";
+  position: absolute;
+  inset: 0 136px 0 0;
+  pointer-events: none;
+  -webkit-app-region: drag;
 }
 .topbar button,
 .topbar input {
@@ -206,6 +221,7 @@ a {
   color: #5e748a;
   font-weight: 700;
   min-width: 225px;
+  -webkit-app-region: drag;
 }
 .search-form {
   margin: auto;
@@ -259,7 +275,17 @@ a {
   display: flex;
   gap: 6px;
 }
+.window-controls {
+  position: fixed;
+  top: 19px;
+  right: 19px;
+  z-index: 50;
+  display: flex;
+  gap: 6px;
+  -webkit-app-region: no-drag;
+}
 .top-actions button,
+.window-controls button,
 .icon-button {
   width: 35px;
   height: 35px;
@@ -270,9 +296,19 @@ a {
   place-items: center;
 }
 .top-actions button:hover,
+.window-controls button:hover,
 .icon-button:hover {
   background: #1d2b3b;
   color: white;
+}
+.window-controls button {
+  -webkit-app-region: no-drag;
+}
+.page-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 .content {
   max-width: 1530px;
@@ -377,6 +413,42 @@ a {
 .results-section {
   margin-top: 40px;
 }
+.search-results {
+  margin-top: 0;
+}
+.search-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.search-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 0;
+  background: none;
+  color: #89a6b8;
+  font-size: 12px;
+  font-weight: 600;
+}
+.search-toolbar button:hover {
+  color: #54d7ee;
+}
+.search-toolbar button:last-child {
+  padding: 6px 10px;
+  border: 1px solid #31495b;
+  border-radius: 7px;
+}
+.light .search-toolbar button {
+  color: #58788d;
+}
+.light .search-toolbar button:hover {
+  color: #168eaa;
+}
+.light .search-toolbar button:last-child {
+  border-color: #cbdde6;
+}
 .section-heading {
   display: flex;
   align-items: end;
@@ -445,6 +517,30 @@ a {
   background: #d6bb8a;
   color: #1e2a31;
   border-color: #d6bb8a;
+}
+.anime-filters {
+  margin-bottom: 22px;
+}
+.anime-filter-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+.anime-filter-line:last-child {
+  margin-bottom: 0;
+}
+.anime-filter-line > span {
+  flex: none;
+  padding-top: 8px;
+  color: #8ba1b4;
+  font-size: 12px;
+}
+.anime-filter-line .tag-list {
+  margin-bottom: 0;
+}
+.light .anime-filter-line > span {
+  color: #587181;
 }
 .poster-grid {
   display: grid;
@@ -755,6 +851,31 @@ a {
   text-align: left;
   color: #e7f2f8;
 }
+.history-open {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+}
+.history-delete {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: transparent;
+  color: #849eb1;
+}
+.history-delete:hover {
+  background: #472d35;
+  color: #ffb9b9;
+}
 .history-card:hover {
   border-color: #26b9d6;
 }
@@ -765,7 +886,7 @@ a {
   border-radius: 5px;
   background: #233648;
 }
-.history-card > div {
+.history-open > div {
   flex: 1;
   min-width: 0;
 }
@@ -794,42 +915,57 @@ a {
   inset: 0;
   background: #0b101a;
   z-index: 20;
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.detail-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   scrollbar-gutter: stable;
 }
 /* 详情页和选集列表使用窄滚动条，避免占用按钮和内容的空间。 */
-.detail-overlay::-webkit-scrollbar,
+.page-scroll::-webkit-scrollbar,
+.detail-scroll::-webkit-scrollbar,
 .episode-list::-webkit-scrollbar {
   width: 6px;
 }
-.detail-overlay::-webkit-scrollbar-track,
+.page-scroll::-webkit-scrollbar-track,
+.detail-scroll::-webkit-scrollbar-track,
 .episode-list::-webkit-scrollbar-track {
   background: transparent;
 }
-.detail-overlay::-webkit-scrollbar-thumb,
+.page-scroll::-webkit-scrollbar-thumb,
+.detail-scroll::-webkit-scrollbar-thumb,
 .episode-list::-webkit-scrollbar-thumb {
   background: #506778;
   border-radius: 6px;
 }
-.detail-overlay::-webkit-scrollbar-button,
+.page-scroll::-webkit-scrollbar-button,
+.detail-scroll::-webkit-scrollbar-button,
 .episode-list::-webkit-scrollbar-button {
   display: none;
 }
 .detail-toolbar {
   height: 65px;
+  flex: none;
   border-bottom: 1px solid #203244;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 36px;
-  position: sticky;
-  top: 0;
+  position: relative;
   z-index: 2;
   background: #0b101af2;
   backdrop-filter: blur(12px);
 }
 .platform-win32 .detail-toolbar {
   padding-right: 160px;
+  -webkit-app-region: no-drag;
+}
+.platform-win32 .detail-toolbar button {
+  -webkit-app-region: no-drag;
 }
 .detail-toolbar > button:first-child {
   display: flex;
@@ -842,6 +978,12 @@ a {
 .detail-toolbar > span {
   font-size: 12px;
   color: #7893a5;
+}
+.platform-win32 .detail-toolbar > span {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  -webkit-app-region: drag;
 }
 .detail-content {
   max-width: 1500px;
@@ -946,6 +1088,11 @@ a {
   border-color: #2cbcdc;
   color: #fff;
 }
+.line-list button:disabled,
+.episode-list button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
 .line-list button.active,
 .episode-list button.active {
   background: #114c61;
@@ -993,6 +1140,46 @@ a {
   width: 100%;
   height: 100%;
   display: block;
+}
+.artplayer-host {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.casting-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  background: radial-gradient(circle at 50% 30%, #254555, #09141f 72%);
+  color: #eaf5f8;
+  text-align: center;
+}
+.casting-screen svg {
+  color: #50cce5;
+}
+.casting-screen strong {
+  font-size: 18px;
+}
+.casting-screen span,
+.casting-screen small {
+  color: #9ab4c2;
+  font-size: 12px;
+}
+.casting-screen button {
+  margin-top: 10px;
+  padding: 9px 15px;
+  border: 1px solid #4b7788;
+  border-radius: 7px;
+  background: #1b3d4e;
+  color: #eaf5f8;
+  font-size: 12px;
+}
+.casting-screen button:disabled {
+  opacity: 0.6;
 }
 .video-error {
   position: absolute;
@@ -1042,9 +1229,6 @@ a {
 }
 .player-actions button:hover {
   background: #16445a;
-}
-.casting-notice {
-  margin: 2px;
 }
 .player-details {
   display: grid;
@@ -1323,6 +1507,27 @@ a {
   margin: 17px 0;
   flex-wrap: wrap;
 }
+.source-concurrency {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 17px 0 0;
+  color: #c9dbe5;
+  font-size: 12px;
+}
+.source-concurrency input {
+  width: 66px;
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid #30485b;
+  border-radius: 7px;
+  background: #0d1926;
+  color: inherit;
+  text-align: center;
+}
+.source-concurrency small {
+  color: #8199aa;
+}
 .source-actions button:hover,
 .theme-switch button:hover {
   border-color: #d6bb8a;
@@ -1407,6 +1612,9 @@ a {
   color: #64c8df;
   font-size: 11px;
   margin: 19px 4px;
+  padding: 0;
+  background: none;
+  cursor: pointer;
 }
 .modal-backdrop {
   justify-content: center;
@@ -1415,11 +1623,33 @@ a {
 .cast-modal {
   width: 440px;
   max-width: calc(100vw - 40px);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
   background: #142232;
   border: 1px solid #315069;
   border-radius: 16px;
   padding: 24px;
   box-shadow: 0 22px 80px #000a;
+}
+.source-format-backdrop {
+  z-index: 40;
+}
+.source-format-modal {
+  width: 540px;
+}
+.source-format-modal pre {
+  overflow-x: auto;
+  margin: 0 0 16px;
+  padding: 16px;
+  border: 1px solid #335164;
+  border-radius: 8px;
+  background: #0d1926;
+  color: #dcecf2;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.source-format-modal code {
+  color: inherit;
 }
 .modal-heading,
 .modal-heading > div {
@@ -1618,6 +1848,7 @@ a {
   border-color: #455d6f;
 }
 .light .top-actions button,
+.light .window-controls button,
 .light .icon-button {
   color: #567488;
   background: #ffffff70;
@@ -1625,12 +1856,27 @@ a {
   box-shadow: inset 0 1px #ffffffd9;
 }
 .light .top-actions button:hover,
+.light .window-controls button:hover,
 .light .icon-button:hover {
   background: #ffffffdf;
   color: #304656;
   box-shadow:
     0 5px 16px #5b728026,
     inset 0 1px #fff;
+}
+.light .source-concurrency {
+  color: #3e5d70;
+}
+.light .source-concurrency input {
+  background: #fff;
+  border-color: #d2e1e9;
+}
+.light .source-concurrency small {
+  color: #668397;
+}
+.light .history-delete:hover {
+  background: #fde7e7;
+  color: #b34f57;
 }
 .light .hero {
   border-color: #ffffffd9;
@@ -1807,7 +2053,8 @@ a {
   color: #304656;
   border-color: #8db7c8;
 }
-.light .detail-overlay::-webkit-scrollbar-thumb,
+.light .page-scroll::-webkit-scrollbar-thumb,
+.light .detail-scroll::-webkit-scrollbar-thumb,
 .light .episode-list::-webkit-scrollbar-thumb {
   background: #aabdc8;
 }
@@ -1889,6 +2136,11 @@ a {
 .light .cast-modal > p,
 .light .device-row small {
   color: #637f91;
+}
+.light .source-format-modal pre {
+  background: #f2f8fb;
+  border-color: #c9dce5;
+  color: #244156;
 }
 .light .airplay-pairing {
   border-color: #c9dce5;

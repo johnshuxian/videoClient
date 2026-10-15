@@ -9,3 +9,4 @@ build/pyinstaller/
 __pycache__/
 *.tsbuildinfo
 .DS_Store
+.playwright-cli/

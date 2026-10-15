@@ -1,6 +1,10 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { parseEpisodes, rewriteManifest } = require("./media.cjs");
+const {
+  parseEpisodes,
+  rewriteManifest,
+  videoUrlFromSharePage,
+} = require("./media.cjs");
 
 test("Apple CMS 的多线路、多集地址按原顺序解析", () => {
   const lines = parseEpisodes({
@@ -11,6 +15,19 @@ test("Apple CMS 的多线路、多集地址按原顺序解析", () => {
   assert.equal(lines.length, 2);
   assert.equal(lines[0].episodes[1].label, "第2集");
   assert.equal(lines[1].episodes[0].url, "https://b.test/movie.mp4");
+});
+
+test("分享页中的转义视频地址被解析为可播放的绝对地址", () => {
+  const html =
+    '<script>var main = "\\/20250625\\/movie\\/index.m3u8?sign=abc";</script>';
+  assert.equal(
+    videoUrlFromSharePage(html, "https://svip.ryplay13.com/share/123"),
+    "https://svip.ryplay13.com/20250625/movie/index.m3u8?sign=abc",
+  );
+  assert.equal(
+    videoUrlFromSharePage("<html></html>", "https://example.com/share/123"),
+    null,
+  );
 });
 
 test("HLS 子清单与分片走代理，带广告标记的片段被过滤", () => {

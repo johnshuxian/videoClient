@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import Artplayer from "artplayer";
 import Hls from "hls.js";
 import {
   ArrowLeft,
@@ -7,7 +8,6 @@ import {
   ChevronDown,
   Clock3,
   Clapperboard,
-  ExternalLink,
   Film,
   History,
   LoaderCircle,
@@ -22,12 +22,13 @@ import {
   Square,
   Sun,
   Moon,
+  Minus,
   Tv,
-  Wifi,
   X,
 } from "lucide-react";
 import type {
   CatalogItem,
+  CatalogType,
   Device,
   HistoryItem,
   SearchItem,
@@ -36,29 +37,59 @@ import type {
   VodDetail,
 } from "./types";
 
+// 补齐豆瓣分类接口列出的标签，并保留现有可用的“动画”和“最新”入口。
 const MOVIE_TAGS = [
   "热门",
   "最新",
   "经典",
+  "可播放",
   "豆瓣高分",
   "冷门佳片",
   "华语",
   "欧美",
   "韩国",
   "日本",
+  "动作",
+  "喜剧",
+  "爱情",
+  "科幻",
+  "悬疑",
+  "恐怖",
+  "成长",
   "动画",
 ];
 const TV_TAGS = [
   "热门",
   "最新",
   "国产剧",
+  "港剧",
   "美剧",
   "英剧",
   "日剧",
   "韩剧",
   "日本动画",
+  "综艺",
   "纪录片",
 ];
+const ANIME_FORMAT_TAGS = ["TV", "OVA", "剧场版", "WEB"];
+const ANIME_GENRE_TAGS = [
+  "科幻",
+  "治愈",
+  "恋爱",
+  "战斗",
+  "校园",
+  "悬疑",
+  "奇幻",
+  "日常",
+];
+const ANIME_FORMAT_SORTS = [
+  { value: "rank", label: "高分" },
+  { value: "date", label: "日期" },
+] as const;
+const ANIME_GENRE_SORTS = [
+  { value: "rank", label: "高分" },
+  { value: "heat", label: "热度" },
+] as const;
 function readStorage<T>(key: string, fallback: T): T {
   const saved = window.videoAPI.readSetting(key);
   return saved === undefined ? fallback : (saved as T);
@@ -98,7 +129,13 @@ function PosterImage({
   return url ? <img src={url} alt={alt} loading={loading} /> : null;
 }
 
-function HeroPoster({ item }: { item: CatalogItem }) {
+function HeroPoster({
+  item,
+  ratingSource,
+}: {
+  item: CatalogItem;
+  ratingSource: string;
+}) {
   const image = useProxyImage(item.poster);
   return (
     <div
@@ -114,7 +151,11 @@ function HeroPoster({ item }: { item: CatalogItem }) {
       <div className="hero-poster-label">
         <span>今日推荐</span>
         <strong>{item.title}</strong>
-        {item.rating && <small>★ {item.rating} 豆瓣评分</small>}
+        {item.rating && (
+          <small>
+            ★ {item.rating} {ratingSource}评分
+          </small>
+        )}
       </div>
     </div>
   );
@@ -133,67 +174,86 @@ function Player({
   onProgress: (position: number, duration: number) => void;
   onEnded: () => void;
 }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const playerRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
+    const container = playerRef.current;
+    if (!container) return;
+    let art: Artplayer | undefined;
     let hls: Hls | undefined;
     let cancelled = false;
     setError("");
-    const restorePosition = () => {
-      if (resume > 5 && resume < video.duration - 15)
-        video.currentTime = resume;
-    };
     window.videoAPI
       .streamUrl(url, filterAds)
       .then((stream) => {
         if (cancelled) return;
-        if (/\.m3u8(?:$|[?#])/i.test(url) && Hls.isSupported()) {
-          hls = new Hls({ maxBufferLength: 40, enableWorker: true });
-          hls.loadSource(stream);
-          hls.attachMedia(video);
-          hls.on(Hls.Events.ERROR, (_, data) => {
-            if (data.fatal) setError(`视频加载失败：${data.details}`);
-          });
-        } else {
-          video.src = stream;
-        }
-        video.addEventListener("loadedmetadata", restorePosition, {
-          once: true,
+        art = new Artplayer({
+          container,
+          url: stream.url,
+          // 代理地址以 /stream 结尾，ArtPlayer 无法从后缀识别 HLS。
+          ...(stream.isHls ? { type: "m3u8" as const } : {}),
+          customType: {
+            m3u8(video, source) {
+              if (Hls.isSupported()) {
+                hls = new Hls({ maxBufferLength: 40, enableWorker: true });
+                hls.loadSource(source);
+                hls.attachMedia(video);
+                hls.on(Hls.Events.ERROR, (_, data) => {
+                  if (data.fatal && !cancelled)
+                    setError(`视频加载失败：${data.details}`);
+                });
+              } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+                video.src = source;
+              } else {
+                setError("当前系统不支持 HLS 视频播放。");
+              }
+            },
+          },
+          lang: "zh-cn",
+          theme: "#37c5e2",
+          autoplay: true,
+          playsInline: true,
+          setting: true,
+          playbackRate: true,
+          pip: true,
+          fullscreen: true,
+          fullscreenWeb: true,
         });
-        video.play().catch(() => {
-          /* 用户可以使用播放器按钮手动开始。 */
+        art.on("video:loadedmetadata", () => {
+          if (art && resume > 5 && resume < art.duration - 15)
+            art.currentTime = resume;
+        });
+        art.on("video:timeupdate", () => {
+          if (art) onProgress(art.currentTime, art.duration || 0);
+        });
+        art.on("video:ended", onEnded);
+        art.on("video:error", () => {
+          const code = art?.video.error?.code;
+          const message =
+            code === MediaError.MEDIA_ERR_NETWORK
+              ? "视频请求失败，请稍后重试或切换线路。"
+              : code === MediaError.MEDIA_ERR_DECODE
+                ? "视频解码失败，当前编码可能不受播放器支持。"
+                : code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
+                  ? "该地址未返回可播放的视频流，可能是网页播放地址或不支持的格式。"
+                  : "该线路暂时无法播放，请切换线路或集数。";
+          if (!cancelled) setError((previous) => previous || message);
         });
       })
-      .catch((error) => setError(error.message));
+      .catch((error) => {
+        if (!cancelled) setError(error.message);
+      });
     return () => {
       cancelled = true;
-      video.removeEventListener("loadedmetadata", restorePosition);
       hls?.destroy();
-      video.pause();
-      video.removeAttribute("src");
-      video.load();
+      art?.destroy(false);
     };
   }, [url, filterAds]);
 
   return (
     <div className="video-shell">
-      <video
-        ref={videoRef}
-        controls
-        autoPlay
-        playsInline
-        onTimeUpdate={(event) =>
-          onProgress(
-            event.currentTarget.currentTime,
-            event.currentTarget.duration || 0,
-          )
-        }
-        onEnded={onEnded}
-        onError={() => setError("该线路暂时无法播放，请切换线路或集数。")}
-      />
+      <div ref={playerRef} className="artplayer-host" />
       {error && <div className="video-error">{error}</div>}
     </div>
   );
@@ -201,8 +261,9 @@ function Player({
 
 export default function App() {
   const [section, setSection] = useState<"home" | "search" | "history">("home");
-  const [type, setType] = useState<"movie" | "tv">("movie");
+  const [type, setType] = useState<CatalogType>("movie");
   const [tag, setTag] = useState("热门");
+  const [animeSort, setAnimeSort] = useState<"rank" | "date" | "heat">("rank");
   const [page, setPage] = useState(0);
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
@@ -227,6 +288,10 @@ export default function App() {
   const [testing, setTesting] = useState(false);
   const [tested, setTested] = useState(0);
   const [testStopped, setTestStopped] = useState(false);
+  const [testBatchSize, setTestBatchSize] = useState(() => {
+    const saved = Number(readStorage("source-test-concurrency", 8));
+    return Number.isInteger(saved) && saved >= 1 && saved <= 100 ? saved : 8;
+  });
   const [theme, setTheme] = useState<"dark" | "light">(
     readStorage("color-theme", "light"),
   );
@@ -236,6 +301,7 @@ export default function App() {
     readStorage("history", []),
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sourceFormatOpen, setSourceFormatOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [searched, setSearched] = useState("");
   const [results, setResults] = useState<SearchItem[]>([]);
@@ -248,19 +314,26 @@ export default function App() {
   const [detailError, setDetailError] = useState("");
   const [line, setLine] = useState(0);
   const [episode, setEpisode] = useState<number | null>(null);
-  const [devices, setDevices] = useState<Device[]>(
-    readStorage("devices", []),
-  );
+  const [devices, setDevices] = useState<Device[]>(readStorage("devices", []));
   const [castOpen, setCastOpen] = useState(false);
   const [castBusy, setCastBusy] = useState(false);
   const [castError, setCastError] = useState("");
   const [castWarnings, setCastWarnings] = useState<string[]>([]);
-  const [casting, setCasting] = useState("");
+  const [castingDevice, setCastingDevice] = useState<Device | null>(null);
   const [pairingDevice, setPairingDevice] = useState<Device | null>(null);
   const [airplayPin, setAirplayPin] = useState("");
   const searchSerial = useRef(0);
+  // 返回搜索前的列表时，保留分类和原来的浏览位置。
+  const searchOrigin = useRef<{
+    section: "home" | "history";
+    scrollTop: number;
+  }>({ section: "home", scrollTop: 0 });
+  const restoreScroll = useRef<number | null>(null);
   const testSerial = useRef(0);
+  const detailSerial = useRef(0);
   const progressSaved = useRef(0);
+  const pageScroll = useRef<HTMLDivElement>(null);
+  const casting = castingDevice?.name || "";
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -269,20 +342,28 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
+    pageScroll.current?.scrollTo(0, restoreScroll.current ?? 0);
+    restoreScroll.current = null;
+  }, [section, type, tag, animeSort]);
+
+  useEffect(() => {
     let cancelled = false;
     setCatalogLoading(true);
     setCatalogError("");
     window.videoAPI
-      .catalog(type, tag, page)
+      .catalog(type, tag, page, animeSort)
       .then((items) => {
         if (cancelled) return;
         setCatalog((previous) =>
           page === 0 ? items : [...previous, ...items],
         );
-        setCatalogHasMore(items.length === 24);
+        setCatalogHasMore(items.length === (type === "anime" ? 20 : 24));
       })
       .catch((error) => {
-        if (!cancelled) setCatalogError(`豆瓣推荐暂时不可用：${error.message}`);
+        if (!cancelled)
+          setCatalogError(
+            `${type === "anime" ? "Bangumi" : "豆瓣"}推荐暂时不可用：${error.message}`,
+          );
       })
       .finally(() => {
         if (!cancelled) setCatalogLoading(false);
@@ -290,16 +371,89 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [type, tag, page, catalogReload]);
+  }, [type, tag, page, animeSort, catalogReload]);
+
+  useEffect(
+    () =>
+      window.videoAPI.onCastEnded(async ({ deviceId, error }) => {
+        if (!castingDevice || castingDevice.id !== deviceId) return;
+        if (error) {
+          setCastError(`电视播放中断：${error}`);
+          setCastingDevice(null);
+          return;
+        }
+        const nextIndex = (episode ?? -1) + 1;
+        const next = detail?.lines[line]?.episodes[nextIndex];
+        if (!autoplay || !next || !detail) {
+          setCastingDevice(null);
+          setEpisode(null);
+          return;
+        }
+        // 电视端结束当前集后，继续把下一集交给同一台设备。
+        setEpisode(nextIndex);
+        setCastBusy(true);
+        setCastError("");
+        try {
+          const ok = await window.videoAPI.cast(
+            castingDevice,
+            next.url,
+            `${detail.title} · ${next.label}`,
+            filterAds,
+          );
+          if (!ok) throw new Error("电视未接受下一集播放请求");
+        } catch (castError) {
+          setCastError(`自动换集投屏失败：${(castError as Error).message}`);
+          setCastingDevice(null);
+        } finally {
+          setCastBusy(false);
+        }
+      }),
+    [castingDevice, detail, line, episode, autoplay, filterAds],
+  );
+
+  useEffect(() => {
+    const currentUrl =
+      episode === null ? null : detail?.lines[line]?.episodes[episode]?.url;
+    if (!castingDevice || !selected || !currentUrl) return;
+    let active = true;
+    let polling = false;
+    const poll = async () => {
+      if (polling) return;
+      polling = true;
+      try {
+        const progress = await window.videoAPI.castProgress().catch(() => null);
+        if (
+          active &&
+          progress?.deviceId === castingDevice.id &&
+          progress.url === currentUrl
+        )
+          recordProgress(progress.position, progress.duration);
+      } finally {
+        polling = false;
+      }
+    };
+    // 电视端控制播放期间，本机播放器已卸载，定时用电视的实际进度更新记录。
+    void poll();
+    const timer = window.setInterval(poll, 5000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [castingDevice, selected, detail, line, episode]);
 
   async function searchFor(value: string) {
     const term = value.trim();
     if (!term) return;
+    if (section !== "search")
+      searchOrigin.current = {
+        section,
+        scrollTop: pageScroll.current?.scrollTop ?? 0,
+      };
     const serial = ++searchSerial.current;
     setQuery(term);
     setSearched(term);
     setSection("search");
-    window.scrollTo(0, 0);
+    pageScroll.current?.scrollTo(0, 0);
     setSelected(null);
     setSearchLoading(true);
     setSearchProgress(0);
@@ -392,11 +546,12 @@ export default function App() {
     setTested(0);
     setTestStopped(false);
     setSourceHealth({});
-    // 每批只探测少量站点，避免同时请求所有源造成网络拥塞。
-    for (let index = 0; index < candidates.length; index += 6) {
+    // 一次测活使用开始时的并发数；设置变更只影响下一次测活。
+    const batchSize = testBatchSize;
+    for (let index = 0; index < candidates.length; index += batchSize) {
       if (runId !== testSerial.current) break;
       await Promise.all(
-        candidates.slice(index, index + 6).map(async (source) => {
+        candidates.slice(index, index + batchSize).map(async (source) => {
           const result = await window.videoAPI
             .testSource(source, runId)
             .catch((error) => ({
@@ -433,17 +588,47 @@ export default function App() {
   }
 
   async function openDetail(item: SearchItem, resumeItem?: HistoryItem) {
+    const serial = ++detailSerial.current;
+    const cachedDetail = resumeItem?.detail;
+    const canResume = Boolean(
+      cachedDetail?.lines[resumeItem?.line ?? 0]?.episodes[
+        resumeItem?.episode ?? 0
+      ]?.url,
+    );
     setSelected(item);
-    setDetail(null);
+    // 播放记录已有完整线路时先进入播放器，后台再获取最新线路。
+    setDetail(canResume && cachedDetail ? cachedDetail : null);
     setDetailError("");
-    setDetailLoading(true);
+    setDetailLoading(!canResume);
     setCastOpen(false);
-    setCasting("");
+    if (castingDevice) window.videoAPI.castStop().catch(() => {});
+    setCastingDevice(null);
     setLine(resumeItem?.line || 0);
     setEpisode(resumeItem ? resumeItem.episode : null);
     try {
-      setDetail(await window.videoAPI.detail(item.sourceUrl, item.id));
+      const freshDetail = await window.videoAPI.detail(item.sourceUrl, item.id);
+      if (serial !== detailSerial.current) return;
+      setDetail(freshDetail);
+      if (
+        resumeItem &&
+        !freshDetail.lines[resumeItem.line]?.episodes[resumeItem.episode]
+      ) {
+        setLine(0);
+        setEpisode(freshDetail.lines[0]?.episodes.length ? 0 : null);
+      }
+      if (resumeItem) {
+        setHistory((previous) => {
+          const next = previous.map((entry) =>
+            entry.key === resumeItem.key
+              ? { ...entry, detail: freshDetail }
+              : entry,
+          );
+          saveStorage("history", next);
+          return next;
+        });
+      }
     } catch (error) {
+      if (serial !== detailSerial.current || canResume) return;
       const message = (error as Error).message;
       setDetailError(
         /TimeoutError|aborted due to timeout|timed out/i.test(message)
@@ -451,18 +636,27 @@ export default function App() {
           : message,
       );
     } finally {
-      setDetailLoading(false);
+      if (serial === detailSerial.current) setDetailLoading(false);
     }
   }
 
-  function changeType(next: "movie" | "tv") {
-    if (next === type && tag === "热门" && page === 0) {
+  function changeType(next: CatalogType) {
+    let nextTag = "热门";
+    if (next === "anime") nextTag = "TV";
+    if (next === "variety") nextTag = "综艺";
+    if (
+      next === type &&
+      tag === nextTag &&
+      (next !== "anime" || animeSort === "rank") &&
+      page === 0
+    ) {
       setSection("home");
       setSelected(null);
       return;
     }
     setType(next);
-    setTag("热门");
+    setTag(nextTag);
+    setAnimeSort("rank");
     setPage(0);
     setCatalog([]);
     setCatalogLoading(true);
@@ -472,9 +666,25 @@ export default function App() {
     setSelected(null);
   }
   function changeTag(next: string) {
-    // 当前标签不会改变请求参数，重复清空列表会让页面一直保持空白。
+    // 切换到不同来源的子标签时，回到该来源都支持的高分排序。
     if (next === tag) return;
     setTag(next);
+    if (
+      type === "anime" &&
+      (ANIME_FORMAT_TAGS.includes(next)
+        ? animeSort === "heat"
+        : animeSort === "date")
+    )
+      setAnimeSort("rank");
+    setPage(0);
+    setCatalog([]);
+    setCatalogLoading(true);
+    setCatalogError("");
+    setCatalogHasMore(true);
+  }
+  function changeAnimeSort(next: "rank" | "date" | "heat") {
+    if (next === animeSort) return;
+    setAnimeSort(next);
     setPage(0);
     setCatalog([]);
     setCatalogLoading(true);
@@ -493,6 +703,7 @@ export default function App() {
     const item: HistoryItem = {
       key: `${selected.sourceUrl}:${selected.id}`,
       item: selected,
+      detail: detail ?? undefined,
       line,
       episode,
       position,
@@ -543,8 +754,9 @@ export default function App() {
     setCastError("");
     try {
       if (device.type === "airplay" && !device.paired) {
-        await window.videoAPI.airplayPairBegin(device.id);
         setPairingDevice(device);
+        setAirplayPin("");
+        await window.videoAPI.airplayPairBegin(device.id);
         return;
       }
       const ok = await window.videoAPI.cast(
@@ -554,9 +766,10 @@ export default function App() {
         filterAds,
       );
       if (!ok) throw new Error("电视未接受播放请求");
-      setCasting(device.name);
+      setCastingDevice(device);
       setCastOpen(false);
     } catch (error) {
+      if (device.type === "airplay") setPairingDevice(null);
       setCastError(`投屏失败：${(error as Error).message}`);
     } finally {
       setCastBusy(false);
@@ -585,7 +798,26 @@ export default function App() {
     }
   }
 
+  async function stopCasting() {
+    setCastBusy(true);
+    setCastError("");
+    try {
+      await window.videoAPI.castStop();
+      setCastingDevice(null);
+    } catch (error) {
+      setCastError(`停止投屏失败：${(error as Error).message}`);
+    } finally {
+      setCastBusy(false);
+    }
+  }
+
   const featured = catalog[0];
+  const categoryName = {
+    movie: "电影",
+    tv: "剧集",
+    anime: "番剧",
+    variety: "综艺",
+  }[type];
   const testTotal = sources.filter((source) => !source.isAdult).length;
   const playing = detail?.lines[line]?.episodes[episode ?? 0];
   // 三列按钮约能放下五个汉字；更长的集名改为两列显示。
@@ -600,6 +832,32 @@ export default function App() {
 
   return (
     <div className={`app-shell ${theme} platform-${window.videoAPI.platform}`}>
+      {window.videoAPI.platform === "win32" && (
+        <div className="window-controls" aria-label="窗口控制">
+          <button
+            title="最小化"
+            aria-label="最小化"
+            onClick={window.videoAPI.minimize}
+          >
+            <Minus size={18} />
+          </button>
+          <button
+            title="最大化或还原"
+            aria-label="最大化或还原"
+            onClick={window.videoAPI.maximize}
+          >
+            <Square size={14} />
+          </button>
+          <button
+            className="window-close"
+            title="关闭"
+            aria-label="关闭"
+            onClick={window.videoAPI.close}
+          >
+            <X size={18} />
+          </button>
+        </div>
+      )}
       <aside className="sidebar">
         <button
           className="brand"
@@ -620,13 +878,25 @@ export default function App() {
           className={`nav-item ${section === "home" && type === "movie" ? "active" : ""}`}
           onClick={() => changeType("movie")}
         >
-          <Film size={19} /> 电影 <ArrowRight size={15} className="nav-arrow" />
+          <Film size={19} /> 电影
         </button>
         <button
           className={`nav-item ${section === "home" && type === "tv" ? "active" : ""}`}
           onClick={() => changeType("tv")}
         >
-          <Tv size={19} /> 电视剧 <ArrowRight size={15} className="nav-arrow" />
+          <Tv size={19} /> 电视剧
+        </button>
+        <button
+          className={`nav-item ${section === "home" && type === "anime" ? "active" : ""}`}
+          onClick={() => changeType("anime")}
+        >
+          <Sparkles size={19} /> 番剧
+        </button>
+        <button
+          className={`nav-item ${section === "home" && type === "variety" ? "active" : ""}`}
+          onClick={() => changeType("variety")}
+        >
+          <Clapperboard size={19} /> 综艺
         </button>
         <div className="nav-caption library-caption">我的片单</div>
         <button
@@ -664,8 +934,8 @@ export default function App() {
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="搜索电影、剧集..."
-              aria-label="搜索电影、剧集"
+              placeholder="搜索电影、剧集、番剧、综艺..."
+              aria-label="搜索影视作品"
             />
             <button type="submit">搜索</button>
           </form>
@@ -691,87 +961,322 @@ export default function App() {
           </div>
         </header>
 
-        <main className="content">
-          {section === "home" && (
-            <>
-              <section className="hero">
-                <div className="hero-glow" />
-                <div className="hero-copy">
-                  <div className="eyebrow">
-                    <Sparkles size={14} /> 豆瓣精选 · 每日发现
+        <div className="page-scroll" ref={pageScroll}>
+          <main className="content">
+            {section === "home" && (
+              <>
+                <section className="hero">
+                  <div className="hero-glow" />
+                  <div className="hero-copy">
+                    <div className="eyebrow">
+                      <Sparkles size={14} />{" "}
+                      {type === "anime"
+                        ? "Bangumi 动画 · 分类精选"
+                        : "豆瓣精选 · 每日发现"}
+                    </div>
+                    <h1>
+                      光影之间，
+                      <br />
+                      <em>遇见好故事。</em>
+                    </h1>
+                    <p>
+                      电影、剧集、番剧与综艺，随心探索。想看的，点开就能找。
+                    </p>
+                    <button
+                      className="hero-button"
+                      onClick={() => featured && searchFor(featured.title)}
+                      disabled={!featured}
+                    >
+                      <Play size={16} fill="currentColor" /> 看看推荐{" "}
+                      <ArrowRight size={17} />
+                    </button>
                   </div>
-                  <h1>
-                    光影之间，
-                    <br />
-                    <em>遇见好故事。</em>
-                  </h1>
-                  <p>电影与剧集，随心探索。想看的，点开就能找。</p>
+                  {featured && (
+                    <HeroPoster
+                      item={featured}
+                      ratingSource={type === "anime" ? "Bangumi" : "豆瓣"}
+                    />
+                  )}
+                </section>
+                <section className="catalog-section">
+                  <div className="section-heading">
+                    <div>
+                      <span className="section-kicker">
+                        EXPLORE THE COLLECTION
+                      </span>
+                      <h2>
+                        {categoryName}推荐 <span>精选好内容</span>
+                      </h2>
+                    </div>
+                    <div className="type-switch">
+                      <button
+                        className={type === "movie" ? "selected" : ""}
+                        onClick={() => changeType("movie")}
+                      >
+                        电影
+                      </button>
+                      <button
+                        className={type === "tv" ? "selected" : ""}
+                        onClick={() => changeType("tv")}
+                      >
+                        剧集
+                      </button>
+                      <button
+                        className={type === "anime" ? "selected" : ""}
+                        onClick={() => changeType("anime")}
+                      >
+                        番剧
+                      </button>
+                      <button
+                        className={type === "variety" ? "selected" : ""}
+                        onClick={() => changeType("variety")}
+                      >
+                        综艺
+                      </button>
+                    </div>
+                  </div>
+                  {(type === "movie" || type === "tv") && (
+                    <div className="tag-list">
+                      {(type === "movie" ? MOVIE_TAGS : TV_TAGS).map((name) => (
+                        <button
+                          key={name}
+                          className={tag === name ? "active" : ""}
+                          onClick={() => changeTag(name)}
+                        >
+                          {name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {type === "anime" && (
+                    <div className="anime-filters">
+                      <div className="anime-filter-line">
+                        <span>形式</span>
+                        <div className="tag-list">
+                          {ANIME_FORMAT_TAGS.map((name) => (
+                            <button
+                              key={name}
+                              className={tag === name ? "active" : ""}
+                              onClick={() => changeTag(name)}
+                            >
+                              {name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="anime-filter-line">
+                        <span>题材</span>
+                        <div className="tag-list">
+                          {ANIME_GENRE_TAGS.map((name) => (
+                            <button
+                              key={name}
+                              className={tag === name ? "active" : ""}
+                              onClick={() => changeTag(name)}
+                            >
+                              {name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="anime-filter-line">
+                        <span>排序</span>
+                        <div className="tag-list">
+                          {(ANIME_FORMAT_TAGS.includes(tag)
+                            ? ANIME_FORMAT_SORTS
+                            : ANIME_GENRE_SORTS
+                          ).map(({ value, label }) => (
+                            <button
+                              key={value}
+                              className={animeSort === value ? "active" : ""}
+                              onClick={() => changeAnimeSort(value)}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {catalogError && (
+                    <div className="notice error">
+                      {catalogError}{" "}
+                      <button
+                        onClick={() =>
+                          setCatalogReload((previous) => previous + 1)
+                        }
+                      >
+                        重试
+                      </button>
+                    </div>
+                  )}
+                  <div className="poster-grid">
+                    {catalog.map((item, index) => (
+                      <button
+                        className="poster-card"
+                        key={`${item.id}-${index}`}
+                        onClick={() => searchFor(item.title)}
+                      >
+                        <div className="poster-image">
+                          <PosterImage
+                            src={item.poster}
+                            alt={`${item.title}海报`}
+                          />
+                          <span className="poster-play">
+                            <Play size={24} fill="currentColor" />
+                          </span>
+                          {item.rating && (
+                            <span className="rating">★ {item.rating}</span>
+                          )}
+                        </div>
+                        <div className="poster-info">
+                          <strong title={item.title}>{item.title}</strong>
+                          {item.episodesInfo && (
+                            <small>{item.episodesInfo}</small>
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                  {catalogLoading && (
+                    <div className="loading">
+                      <LoaderCircle className="spin" size={20} />{" "}
+                      正在加载推荐...
+                    </div>
+                  )}
+                  {!catalogLoading && !catalogError && catalog.length === 0 && (
+                    <div className="empty">
+                      <Film size={36} />
+                      <h3>这个分类暂时没有推荐</h3>
+                      <p>可以试试其他分类，或稍后再来看。</p>
+                    </div>
+                  )}
+                  {!catalogLoading &&
+                    !catalogError &&
+                    catalogHasMore &&
+                    catalog.length > 0 && (
+                      <button
+                        className="load-more"
+                        onClick={() => setPage(page + 1)}
+                      >
+                        加载更多 <ChevronDown size={16} />
+                      </button>
+                    )}
+                </section>
+              </>
+            )}
+
+            {section === "search" && (
+              <section className="results-section search-results">
+                <div className="search-toolbar">
                   <button
-                    className="hero-button"
-                    onClick={() => featured && searchFor(featured.title)}
-                    disabled={!featured}
+                    type="button"
+                    onClick={() => {
+                      ++searchSerial.current;
+                      setSearchLoading(false);
+                      restoreScroll.current = searchOrigin.current.scrollTop;
+                      setSection(searchOrigin.current.section);
+                    }}
                   >
-                    <Play size={16} fill="currentColor" /> 看看推荐{" "}
-                    <ArrowRight size={17} />
+                    <ArrowLeft size={17} /> 返回列表
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => searchFor(searched)}
+                    title="重新搜索当前关键词"
+                    aria-label="重新搜索当前关键词"
+                  >
+                    <RefreshCw
+                      size={16}
+                      className={searchLoading ? "spin" : ""}
+                    />
+                    刷新
                   </button>
                 </div>
-                {featured && <HeroPoster item={featured} />}
-              </section>
-              <section className="catalog-section">
                 <div className="section-heading">
                   <div>
-                    <span className="section-kicker">
-                      EXPLORE THE COLLECTION
-                    </span>
+                    <span className="section-kicker">SEARCH RESULTS</span>
                     <h2>
-                      {type === "movie" ? "电影" : "剧集"}推荐{" "}
-                      <span>精选好内容</span>
+                      “{searched}” 的搜索结果{" "}
+                      <span>
+                        {searchLoading
+                          ? `已找到 ${results.length} 条 · 搜索中...`
+                          : `共 ${results.length} 条`}
+                      </span>
                     </h2>
                   </div>
-                  <div className="type-switch">
-                    <button
-                      className={type === "movie" ? "selected" : ""}
-                      onClick={() => changeType("movie")}
-                    >
-                      电影
-                    </button>
-                    <button
-                      className={type === "tv" ? "selected" : ""}
-                      onClick={() => changeType("tv")}
-                    >
-                      剧集
-                    </button>
+                </div>
+                <p className="search-subtitle">
+                  来自 {enabled.length} 个已启用点播源 · 点击资源查看线路与选集
+                </p>
+                {failed.length > 0 && (
+                  <div className="notice">
+                    {failed.length} 个源暂时无响应：
+                    {failed.slice(0, 6).join("、")}
+                    {failed.length > 6 ? "…" : ""}
                   </div>
-                </div>
-                <div className="tag-list">
-                  {(type === "movie" ? MOVIE_TAGS : TV_TAGS).map((name) => (
+                )}
+                {searchLoading && results.length === 0 && (
+                  <div className="search-wait" role="status" aria-live="polite">
+                    <div className="search-wait-card">
+                      <div className="search-wait-symbol" aria-hidden="true">
+                        <Search size={24} />
+                      </div>
+                      <p>正在搜索各个点播源，请稍候...</p>
+                      <div className="search-progress-label">
+                        <span>搜索进度</span>
+                        <b>{searchProgress}%</b>
+                      </div>
+                      <div
+                        className="search-progress"
+                        role="progressbar"
+                        aria-label="搜索进度"
+                        aria-valuenow={searchProgress}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                      >
+                        <span style={{ width: `${searchProgress}%` }} />
+                      </div>
+                      <small>搜索结果即将呈现</small>
+                    </div>
+                  </div>
+                )}
+                {searchLoading && results.length > 0 && (
+                  <div className="search-progress-inline" role="status">
+                    <span>继续搜索其他点播源</span>
+                    <b>{searchProgress}%</b>
+                    <div className="search-progress">
+                      <span style={{ width: `${searchProgress}%` }} />
+                    </div>
+                  </div>
+                )}
+                {!searchLoading && enabled.length === 0 && (
+                  <div className="empty">
+                    <Settings2 size={36} />
+                    <h3>先导入点播源</h3>
+                    <p>在播放设置中粘贴 VOD 源订阅地址，导入后即可搜索。</p>
                     <button
-                      key={name}
-                      className={tag === name ? "active" : ""}
-                      onClick={() => changeTag(name)}
+                      className="primary-button"
+                      onClick={() => setSettingsOpen(true)}
                     >
-                      {name}
-                    </button>
-                  ))}
-                </div>
-                {catalogError && (
-                  <div className="notice error">
-                    {catalogError}{" "}
-                    <button
-                      onClick={() =>
-                        setCatalogReload((previous) => previous + 1)
-                      }
-                    >
-                      重试
+                      导入点播源
                     </button>
                   </div>
                 )}
-                <div className="poster-grid">
-                  {catalog.map((item, index) => (
+                {!searchLoading &&
+                  enabled.length > 0 &&
+                  results.length === 0 && (
+                    <div className="empty">
+                      <Search size={36} />
+                      <h3>没有找到相关资源</h3>
+                      <p>试试更短的片名，或在设置中启用更多点播源。</p>
+                    </div>
+                  )}
+                <div className="poster-grid result-grid">
+                  {results.map((item) => (
                     <button
                       className="poster-card"
-                      key={`${item.id}-${index}`}
-                      onClick={() => searchFor(item.title)}
+                      key={`${item.sourceUrl}:${item.id}`}
+                      onClick={() => openDetail(item)}
                     >
                       <div className="poster-image">
                         <PosterImage
@@ -781,219 +1286,102 @@ export default function App() {
                         <span className="poster-play">
                           <Play size={24} fill="currentColor" />
                         </span>
-                        {item.rating && (
+                        {item.rating && item.rating !== "0.0" && (
                           <span className="rating">★ {item.rating}</span>
                         )}
                       </div>
                       <div className="poster-info">
                         <strong title={item.title}>{item.title}</strong>
-                        {item.episodesInfo && (
-                          <small>{item.episodesInfo}</small>
-                        )}
+                        <div className="result-meta">
+                          <span>{item.source}</span>
+                          <small>{item.year || item.remarks}</small>
+                        </div>
                       </div>
                     </button>
                   ))}
                 </div>
-                {catalogLoading && (
-                  <div className="loading">
-                    <LoaderCircle className="spin" size={20} /> 正在加载推荐...
+              </section>
+            )}
+
+            {section === "history" && (
+              <section className="results-section">
+                <div className="section-heading">
+                  <div>
+                    <span className="section-kicker">
+                      PICK UP WHERE YOU LEFT OFF
+                    </span>
+                    <h2>
+                      播放记录 <span>继续你的观影时光</span>
+                    </h2>
                   </div>
-                )}
-                {!catalogLoading && !catalogError && catalog.length === 0 && (
-                  <div className="empty">
-                    <Film size={36} />
-                    <h3>这个分类暂时没有推荐</h3>
-                    <p>可以试试其他分类，或稍后再来看。</p>
-                  </div>
-                )}
-                {!catalogLoading &&
-                  !catalogError &&
-                  catalogHasMore &&
-                  catalog.length > 0 && (
+                  {history.length > 0 && (
                     <button
-                      className="load-more"
-                      onClick={() => setPage(page + 1)}
+                      className="subtle-button"
+                      onClick={() => {
+                        setHistory([]);
+                        saveStorage("history", []);
+                      }}
                     >
-                      加载更多 <ChevronDown size={16} />
+                      清空记录
                     </button>
                   )}
-              </section>
-            </>
-          )}
-
-          {section === "search" && (
-            <section className="results-section">
-              <div className="section-heading">
-                <div>
-                  <span className="section-kicker">SEARCH RESULTS</span>
-                  <h2>
-                    “{searched}” 的搜索结果{" "}
-                    <span>
-                      {searchLoading
-                        ? `已找到 ${results.length} 条 · 搜索中...`
-                        : `共 ${results.length} 条`}
-                    </span>
-                  </h2>
                 </div>
-              </div>
-              <p className="search-subtitle">
-                来自 {enabled.length} 个已启用点播源 · 点击资源查看线路与选集
-              </p>
-              {failed.length > 0 && (
-                <div className="notice">
-                  {failed.length} 个源暂时无响应：
-                  {failed.slice(0, 6).join("、")}
-                  {failed.length > 6 ? "…" : ""}
-                </div>
-              )}
-              {searchLoading && results.length === 0 && (
-                <div className="search-wait" role="status" aria-live="polite">
-                  <div className="search-wait-card">
-                    <div className="search-wait-symbol" aria-hidden="true">
-                      <Search size={24} />
-                    </div>
-                    <p>正在搜索各个点播源，请稍候...</p>
-                    <div className="search-progress-label">
-                      <span>搜索进度</span>
-                      <b>{searchProgress}%</b>
-                    </div>
-                    <div
-                      className="search-progress"
-                      role="progressbar"
-                      aria-label="搜索进度"
-                      aria-valuenow={searchProgress}
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                    >
-                      <span style={{ width: `${searchProgress}%` }} />
-                    </div>
-                    <small>搜索结果即将呈现</small>
+                {history.length === 0 ? (
+                  <div className="empty">
+                    <History size={38} />
+                    <h3>还没有播放记录</h3>
+                    <p>找到喜欢的影片并开始播放，进度会自动保存在这里。</p>
                   </div>
-                </div>
-              )}
-              {searchLoading && results.length > 0 && (
-                <div className="search-progress-inline" role="status">
-                  <span>继续搜索其他点播源</span>
-                  <b>{searchProgress}%</b>
-                  <div className="search-progress">
-                    <span style={{ width: `${searchProgress}%` }} />
-                  </div>
-                </div>
-              )}
-              {!searchLoading && enabled.length === 0 && (
-                <div className="empty">
-                  <Settings2 size={36} />
-                  <h3>先导入点播源</h3>
-                  <p>在播放设置中粘贴 VOD 源订阅地址，导入后即可搜索。</p>
-                  <button
-                    className="primary-button"
-                    onClick={() => setSettingsOpen(true)}
-                  >
-                    导入点播源
-                  </button>
-                </div>
-              )}
-              {!searchLoading && enabled.length > 0 && results.length === 0 && (
-                <div className="empty">
-                  <Search size={36} />
-                  <h3>没有找到相关资源</h3>
-                  <p>试试更短的片名，或在设置中启用更多点播源。</p>
-                </div>
-              )}
-              <div className="poster-grid result-grid">
-                {results.map((item) => (
-                  <button
-                    className="poster-card"
-                    key={`${item.sourceUrl}:${item.id}`}
-                    onClick={() => openDetail(item)}
-                  >
-                    <div className="poster-image">
-                      <PosterImage
-                        src={item.poster}
-                        alt={`${item.title}海报`}
-                      />
-                      <span className="poster-play">
-                        <Play size={24} fill="currentColor" />
-                      </span>
-                      {item.rating && item.rating !== "0.0" && (
-                        <span className="rating">★ {item.rating}</span>
-                      )}
-                    </div>
-                    <div className="poster-info">
-                      <strong title={item.title}>{item.title}</strong>
-                      <div className="result-meta">
-                        <span>{item.source}</span>
-                        <small>{item.year || item.remarks}</small>
+                ) : (
+                  <div className="history-list">
+                    {history.map((entry) => (
+                      <div key={entry.key} className="history-card">
+                        <button
+                          className="history-open"
+                          onClick={() => openDetail(entry.item, entry)}
+                          aria-label={`继续播放 ${entry.item.title}`}
+                        >
+                          <PosterImage src={entry.item.poster} />
+                          <div>
+                            <strong>{entry.item.title}</strong>
+                            <p>
+                              {entry.item.source} · 第 {entry.episode + 1} 集
+                            </p>
+                            <div className="progress">
+                              <span
+                                style={{
+                                  width: `${Math.min(100, entry.duration ? (entry.position / entry.duration) * 100 : 0)}%`,
+                                }}
+                              />
+                            </div>
+                            <small>
+                              已播放 {Math.floor(entry.position / 60)} 分钟
+                            </small>
+                          </div>
+                          <Play size={18} />
+                        </button>
+                        <button
+                          className="history-delete"
+                          title={`删除 ${entry.item.title} 的播放记录`}
+                          aria-label={`删除 ${entry.item.title} 的播放记录`}
+                          onClick={() => {
+                            const next = history.filter(
+                              (item) => item.key !== entry.key,
+                            );
+                            setHistory(next);
+                            saveStorage("history", next);
+                          }}
+                        >
+                          <X size={16} />
+                        </button>
                       </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </section>
-          )}
-
-          {section === "history" && (
-            <section className="results-section">
-              <div className="section-heading">
-                <div>
-                  <span className="section-kicker">
-                    PICK UP WHERE YOU LEFT OFF
-                  </span>
-                  <h2>
-                    播放记录 <span>继续你的观影时光</span>
-                  </h2>
-                </div>
-                {history.length > 0 && (
-                  <button
-                    className="subtle-button"
-                    onClick={() => {
-                      setHistory([]);
-                      saveStorage("history", []);
-                    }}
-                  >
-                    清空记录
-                  </button>
+                    ))}
+                  </div>
                 )}
-              </div>
-              {history.length === 0 ? (
-                <div className="empty">
-                  <History size={38} />
-                  <h3>还没有播放记录</h3>
-                  <p>找到喜欢的影片并开始播放，进度会自动保存在这里。</p>
-                </div>
-              ) : (
-                <div className="history-list">
-                  {history.map((entry) => (
-                    <button
-                      key={entry.key}
-                      className="history-card"
-                      onClick={() => openDetail(entry.item, entry)}
-                    >
-                      <PosterImage src={entry.item.poster} />
-                      <div>
-                        <strong>{entry.item.title}</strong>
-                        <p>
-                          {entry.item.source} · 第 {entry.episode + 1} 集
-                        </p>
-                        <div className="progress">
-                          <span
-                            style={{
-                              width: `${Math.min(100, entry.duration ? (entry.position / entry.duration) * 100 : 0)}%`,
-                            }}
-                          />
-                        </div>
-                        <small>
-                          已播放 {Math.floor(entry.position / 60)} 分钟
-                        </small>
-                      </div>
-                      <Play size={18} />
-                    </button>
-                  ))}
-                </div>
-              )}
-            </section>
-          )}
-        </main>
+              </section>
+            )}
+          </main>
+        </div>
       </div>
 
       {selected && (
@@ -1001,6 +1389,9 @@ export default function App() {
           <div className="detail-toolbar">
             <button
               onClick={() => {
+                ++detailSerial.current;
+                if (castingDevice) window.videoAPI.castStop().catch(() => {});
+                setCastingDevice(null);
                 setSelected(null);
                 setDetail(null);
                 setEpisode(null);
@@ -1009,204 +1400,211 @@ export default function App() {
               <ArrowLeft size={19} /> 返回列表
             </button>
             <span>影片详情</span>
-            <button
-              className="icon-button"
-              title="关闭"
-              onClick={() => {
-                setSelected(null);
-                setDetail(null);
-                setEpisode(null);
-              }}
-            >
-              <X size={20} />
-            </button>
           </div>
-          {detailLoading ? (
-            <div className="loading detail-loading">
-              <LoaderCircle className="spin" size={24} /> 正在获取播放线路...
-            </div>
-          ) : detailError ? (
-            <div className="empty">
-              <h3>获取详情失败</h3>
-              <p>{detailError}</p>
-              <button
-                className="primary-button"
-                onClick={() => openDetail(selected)}
-              >
-                重试
-              </button>
-            </div>
-          ) : (
-            detail && (
-              <div className="detail-content">
-                <div className="detail-main">
-                  {episode === null ? (
-                    <div className="detail-hero">
-                      <PosterImage src={detail.poster || selected.poster} />
-                      <div className="detail-hero-copy">
-                        <div className="eyebrow">
-                          <Clapperboard size={15} /> {selected.source} ·{" "}
-                          {selected.type || "影视"}
-                        </div>
-                        <h1>{detail.title}</h1>
-                        <div className="detail-facts">
-                          {detail.year && <span>{detail.year}</span>}
-                          {detail.area && <span>{detail.area}</span>}
-                          {selected.rating && <span>★ {selected.rating}</span>}
-                        </div>
-                        <p>{detail.description || "暂无剧情介绍"}</p>
-                        {detail.actors && <small>主演：{detail.actors}</small>}
-                        <button
-                          className="primary-button"
-                          onClick={() => setEpisode(0)}
-                          disabled={!playing}
-                        >
-                          <Play size={17} fill="currentColor" />{" "}
-                          {selectedHistory ? "继续播放" : "立即播放"}
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    playing && (
-                      <>
-                        <Player
-                          key={`${playing.url}-${filterAds}`}
-                          url={playing.url}
-                          filterAds={filterAds}
-                          resume={
-                            selectedHistory?.line === line &&
-                            selectedHistory.episode === episode
-                              ? selectedHistory.position
-                              : 0
-                          }
-                          onProgress={recordProgress}
-                          onEnded={nextEpisode}
-                        />
-                        <div className="player-title">
-                          <div>
-                            <span>正在播放</span>
-                            <h2>
-                              {detail.title} <small>· {playing.label}</small>
-                            </h2>
+          <div className="detail-scroll">
+            {detailLoading ? (
+              <div className="loading detail-loading">
+                <LoaderCircle className="spin" size={24} /> 正在获取播放线路...
+              </div>
+            ) : detailError ? (
+              <div className="empty">
+                <h3>获取详情失败</h3>
+                <p>{detailError}</p>
+                <button
+                  className="primary-button"
+                  onClick={() => openDetail(selected)}
+                >
+                  重试
+                </button>
+              </div>
+            ) : (
+              detail && (
+                <div className="detail-content">
+                  <div className="detail-main">
+                    {episode === null ? (
+                      <div className="detail-hero">
+                        <PosterImage src={detail.poster || selected.poster} />
+                        <div className="detail-hero-copy">
+                          <div className="eyebrow">
+                            <Clapperboard size={15} /> {selected.source} ·{" "}
+                            {selected.type || "影视"}
                           </div>
-                          <div className="player-actions">
-                            <button onClick={scanDevices}>
-                              <MonitorPlay size={17} />{" "}
-                              {casting ? `已投至 ${casting}` : "投屏"}
-                            </button>
-                            {episode + 1 <
-                              detail.lines[line].episodes.length && (
-                              <button onClick={() => setEpisode(episode + 1)}>
-                                <SkipForward size={17} /> 下一集
-                              </button>
+                          <h1>{detail.title}</h1>
+                          <div className="detail-facts">
+                            {detail.year && <span>{detail.year}</span>}
+                            {detail.area && <span>{detail.area}</span>}
+                            {selected.rating && (
+                              <span>★ {selected.rating}</span>
                             )}
                           </div>
+                          <p>{detail.description || "暂无剧情介绍"}</p>
+                          {detail.actors && (
+                            <small>主演：{detail.actors}</small>
+                          )}
+                          <button
+                            className="primary-button"
+                            onClick={() => setEpisode(0)}
+                            disabled={!playing}
+                          >
+                            <Play size={17} fill="currentColor" />{" "}
+                            {selectedHistory ? "继续播放" : "立即播放"}
+                          </button>
                         </div>
-                        {casting && (
-                          <div className="notice casting-notice">
-                            <Wifi size={17} /> 正在电视「{casting}」播放{" "}
+                      </div>
+                    ) : (
+                      playing && (
+                        <>
+                          {casting ? (
+                            <div
+                              className="video-shell casting-screen"
+                              role="status"
+                            >
+                              <MonitorPlay size={48} />
+                              <strong>正在投屏到「{casting}」</strong>
+                              <span>本机播放已停止</span>
+                              <button onClick={stopCasting} disabled={castBusy}>
+                                {castBusy
+                                  ? "正在停止投屏..."
+                                  : "停止投屏并返回本机播放"}
+                              </button>
+                              {castError && <small>{castError}</small>}
+                            </div>
+                          ) : (
+                            <Player
+                              key={`${playing.url}-${filterAds}`}
+                              url={playing.url}
+                              filterAds={filterAds}
+                              resume={
+                                selectedHistory?.line === line &&
+                                selectedHistory.episode === episode
+                                  ? selectedHistory.position
+                                  : 0
+                              }
+                              onProgress={recordProgress}
+                              onEnded={nextEpisode}
+                            />
+                          )}
+                          <div className="player-title">
+                            <div>
+                              <span>{casting ? "正在投屏" : "正在播放"}</span>
+                              <h2>
+                                {detail.title} <small>· {playing.label}</small>
+                              </h2>
+                            </div>
+                            {!casting && (
+                              <div className="player-actions">
+                                <button onClick={scanDevices}>
+                                  <MonitorPlay size={17} /> 投屏
+                                </button>
+                                {episode + 1 <
+                                  detail.lines[line].episodes.length && (
+                                  <button
+                                    onClick={() => setEpisode(episode + 1)}
+                                  >
+                                    <SkipForward size={17} /> 下一集
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          {castError && !castOpen && !casting && (
+                            <div className="notice error">{castError}</div>
+                          )}
+                          <section className="player-details">
+                            <div className="player-details-cover">
+                              <PosterImage
+                                src={detail.poster || selected.poster}
+                                alt={`${detail.title}海报`}
+                              />
+                            </div>
+                            <div className="player-details-copy">
+                              <span className="player-details-kicker">
+                                影片详情
+                              </span>
+                              <h3>{detail.title}</h3>
+                              <div className="player-details-meta">
+                                {detail.year && <span>{detail.year}</span>}
+                                {detail.area && <span>{detail.area}</span>}
+                                {selected.type && <span>{selected.type}</span>}
+                                <span>来源：{selected.source}</span>
+                              </div>
+                              {detail.actors && (
+                                <p className="player-details-actors">
+                                  主演：{detail.actors}
+                                </p>
+                              )}
+                              <p className="player-details-description">
+                                {detail.description || "暂无剧情介绍"}
+                              </p>
+                            </div>
+                          </section>
+                        </>
+                      )
+                    )}
+                  </div>
+                  <div className="episode-panel">
+                    <div className="panel-title">
+                      <span>播放线路</span>
+                      <strong>{detail.lines.length} 条</strong>
+                    </div>
+                    {detail.lines.length === 0 ? (
+                      <div className="notice">
+                        这个资源暂时没有可播放地址，请返回换一个源。
+                      </div>
+                    ) : (
+                      <>
+                        <div className="line-list">
+                          {detail.lines.map((item, index) => (
                             <button
+                              key={`${item.name}-${index}`}
+                              className={line === index ? "active" : ""}
+                              disabled={!!casting}
                               onClick={() => {
-                                window.videoAPI.castStop().catch(() => {});
-                                setCasting("");
+                                setLine(index);
+                                setEpisode(null);
                               }}
                             >
-                              停止投屏
+                              {item.name}
                             </button>
-                          </div>
-                        )}
-                        <section className="player-details">
-                          <div className="player-details-cover">
-                            <PosterImage
-                              src={detail.poster || selected.poster}
-                              alt={`${detail.title}海报`}
-                            />
-                          </div>
-                          <div className="player-details-copy">
-                            <span className="player-details-kicker">
-                              影片详情
-                            </span>
-                            <h3>{detail.title}</h3>
-                            <div className="player-details-meta">
-                              {detail.year && <span>{detail.year}</span>}
-                              {detail.area && <span>{detail.area}</span>}
-                              {selected.type && <span>{selected.type}</span>}
-                              <span>来源：{selected.source}</span>
-                            </div>
-                            {detail.actors && (
-                              <p className="player-details-actors">
-                                主演：{detail.actors}
-                              </p>
-                            )}
-                            <p className="player-details-description">
-                              {detail.description || "暂无剧情介绍"}
-                            </p>
-                          </div>
-                        </section>
+                          ))}
+                        </div>
+                        <div className="panel-title episodes-title">
+                          <span>选集播放</span>
+                          <strong>
+                            共 {detail.lines[line].episodes.length} 集
+                          </strong>
+                        </div>
+                        <div
+                          className={
+                            hasLongEpisodeLabels
+                              ? "episode-list episode-list-long"
+                              : "episode-list"
+                          }
+                        >
+                          {detail.lines[line].episodes.map((item, index) => (
+                            <button
+                              key={`${item.url}-${index}`}
+                              className={episode === index ? "active" : ""}
+                              disabled={!!casting}
+                              onClick={() => setEpisode(index)}
+                              title={item.label}
+                            >
+                              {item.label}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="panel-tip">
+                          <ShieldCheck size={16} /> 广告过滤
+                          {filterAds ? "已开启" : "已关闭"} · 自动连播
+                          {autoplay ? "已开启" : "已关闭"}
+                        </div>
                       </>
-                    )
-                  )}
-                </div>
-                <div className="episode-panel">
-                  <div className="panel-title">
-                    <span>播放线路</span>
-                    <strong>{detail.lines.length} 条</strong>
+                    )}
                   </div>
-                  {detail.lines.length === 0 ? (
-                    <div className="notice">
-                      这个资源暂时没有可播放地址，请返回换一个源。
-                    </div>
-                  ) : (
-                    <>
-                      <div className="line-list">
-                        {detail.lines.map((item, index) => (
-                          <button
-                            key={`${item.name}-${index}`}
-                            className={line === index ? "active" : ""}
-                            onClick={() => {
-                              setLine(index);
-                              setEpisode(null);
-                            }}
-                          >
-                            {item.name}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="panel-title episodes-title">
-                        <span>选集播放</span>
-                        <strong>
-                          共 {detail.lines[line].episodes.length} 集
-                        </strong>
-                      </div>
-                      <div
-                        className={
-                          hasLongEpisodeLabels
-                            ? "episode-list episode-list-long"
-                            : "episode-list"
-                        }
-                      >
-                        {detail.lines[line].episodes.map((item, index) => (
-                          <button
-                            key={`${item.url}-${index}`}
-                            className={episode === index ? "active" : ""}
-                            onClick={() => setEpisode(index)}
-                            title={item.label}
-                          >
-                            {item.label}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="panel-tip">
-                        <ShieldCheck size={16} /> 广告过滤
-                        {filterAds ? "已开启" : "已关闭"} · 自动连播
-                        {autoplay ? "已开启" : "已关闭"}
-                      </div>
-                    </>
-                  )}
                 </div>
-              </div>
-            )
-          )}
+              )
+            )}
+          </div>
         </div>
       )}
 
@@ -1223,12 +1621,6 @@ export default function App() {
                 <span>偏好设置</span>
                 <h2>让观影更顺手</h2>
               </div>
-              <button
-                className="icon-button"
-                onClick={() => setSettingsOpen(false)}
-              >
-                <X size={20} />
-              </button>
             </div>
             <div className="settings-body">
               <h3>外观</h3>
@@ -1316,6 +1708,26 @@ export default function App() {
                 </p>
               )}
               {sourceError && <div className="notice error">{sourceError}</div>}
+              <label className="source-concurrency">
+                <span>每批并发测试</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  step={1}
+                  value={testBatchSize}
+                  disabled={testing}
+                  onChange={(event) => {
+                    const value = Number(event.target.value);
+                    if (!Number.isInteger(value) || value < 1 || value > 100)
+                      return;
+                    setTestBatchSize(value);
+                    saveStorage("source-test-concurrency", value);
+                  }}
+                  aria-label="每批并发测试的点播源数量"
+                />
+                <small>个源（1–100）</small>
+              </label>
               {sources.length > 0 && (
                 <div className="source-actions">
                   <button
@@ -1375,7 +1787,7 @@ export default function App() {
                   <p>
                     {testStopped
                       ? "已保留完成的结果，可重新测活。"
-                      : "每批并发测试 6 个源，完成后自动更新勾选状态。"}
+                      : `每批并发测试 ${testBatchSize} 个源，完成后自动更新勾选状态。`}
                   </p>
                 </div>
               )}
@@ -1417,15 +1829,62 @@ export default function App() {
                     </label>
                   ))}
               </div>
-              <a
+              <button
+                type="button"
                 className="source-link"
-                href="https://github.com/LibreSpark/LibreTV/wiki/Data-Sources"
-                target="_blank"
-                rel="noreferrer"
+                onClick={() => setSourceFormatOpen(true)}
               >
-                了解点播源格式 <ExternalLink size={14} />
-              </a>
+                了解点播源格式 <ChevronDown size={14} />
+              </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {sourceFormatOpen && (
+        <div
+          className="modal-backdrop source-format-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget)
+              setSourceFormatOpen(false);
+          }}
+        >
+          <div
+            className="cast-modal source-format-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="source-format-title"
+          >
+            <div className="modal-heading">
+              <div>
+                <Settings2 size={22} />
+                <h2 id="source-format-title">点播源格式示例</h2>
+              </div>
+              <button
+                className="icon-button"
+                aria-label="关闭点播源格式示例"
+                onClick={() => setSourceFormatOpen(false)}
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <p>
+              订阅地址应返回 JSON。每个点播源需要名称和 Apple CMS 接口地址；
+              <code>isAdult</code> 可省略，默认为非成人源。
+            </p>
+            <pre>{`{
+  "sources": [
+    {
+      "name": "示例点播源",
+      "url": "https://example.com/api.php/provide/vod/",
+      "isAdult": false
+    }
+  ]
+}`}</pre>
+            <p>
+              这里的 example.com 仅作格式示例。将自己的 JSON 文件放到可访问的
+              HTTP 或 HTTPS 地址，再把文件地址粘贴到上方的订阅输入框。
+            </p>
           </div>
         </div>
       )}
@@ -1525,9 +1984,11 @@ export default function App() {
                 <ArrowRight size={17} />
               </button>
             ))}
-            <button className="load-more" onClick={scanDevices}>
-              <RefreshCw size={15} /> 重新搜索
-            </button>
+            {!castBusy && !pairingDevice && (
+              <button className="load-more" onClick={scanDevices}>
+                <RefreshCw size={15} /> 重新搜索
+              </button>
+            )}
           </div>
         </div>
       )}

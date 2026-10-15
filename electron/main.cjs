@@ -5,8 +5,16 @@ const os = require("node:os");
 const crypto = require("node:crypto");
 const { Readable } = require("node:stream");
 const { pipeline } = require("node:stream/promises");
-const { parseEpisodes, rewriteManifest } = require("./media.cjs");
-const { requestAirPlay, closeAirPlay } = require("./airplay.cjs");
+const {
+  parseEpisodes,
+  rewriteManifest,
+  videoUrlFromSharePage,
+} = require("./media.cjs");
+const {
+  requestAirPlay,
+  closeAirPlay,
+  setAirPlayEventHandler,
+} = require("./airplay.cjs");
 const { createSettingsStore } = require("./settings.cjs");
 
 const requestHeaders = {
@@ -21,6 +29,7 @@ const sourceTestRuns = new Map();
 let activeSearch;
 let proxyPort = 0;
 let currentCast = null;
+let castSession = 0;
 let mainWindow;
 let settingsStore;
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -39,6 +48,27 @@ async function stopCurrentCast() {
     }
   }
 }
+
+function reportCastEnded(cast, error) {
+  if (currentCast !== cast) return;
+  currentCast = null;
+  if (cast.type === "dlna") cast.control.dispose();
+  mainWindow?.webContents.send("cast:ended", {
+    deviceId: cast.device.id,
+    error: error || "",
+  });
+}
+
+setAirPlayEventHandler((message) => {
+  const cast = currentCast;
+  if (cast?.type === "airplay" && cast.sessionId === message.sessionId) {
+    // 先排队释放已结束的 AirPlay 连接，再通知页面切换下一集。
+    requestAirPlay("stop").catch((error) =>
+      console.warn("AirPlay 连接清理失败：", error),
+    );
+    reportCastEnded(cast, message.error);
+  }
+});
 
 async function fetchWithTimeout(url, ms = 9000, headers = {}, cancelSignal) {
   const response = await fetch(url, {
@@ -63,6 +93,23 @@ function getLanIp() {
 
 function proxyUrl(url, filterAds, host = "127.0.0.1") {
   return `http://${host}:${proxyPort}/${token}/stream?url=${encodeURIComponent(url)}&ads=${filterAds ? "1" : "0"}`;
+}
+
+async function resolvePlayableUrl(input) {
+  const url = new URL(input);
+  if (!["http:", "https:"].includes(url.protocol))
+    throw new Error("播放地址无效");
+  if (!/^\/share\/[^/]+\/?$/.test(url.pathname)) return url.href;
+
+  const response = await fetchWithTimeout(url, 12000, {
+    Referer: `${url.origin}/`,
+  });
+  if (!/text\/html/i.test(response.headers.get("content-type") || ""))
+    return response.url;
+  const playable = videoUrlFromSharePage(await response.text(), response.url);
+  if (!playable)
+    throw new Error("该线路返回的是播放网页，未找到可直接播放的视频地址");
+  return playable;
 }
 
 function imageProxyUrl(url) {
@@ -206,11 +253,9 @@ function createWindow() {
     minHeight: 620,
     title: "影窗",
     backgroundColor: "#f5f8fc",
-    titleBarStyle: "hidden",
-    titleBarOverlay:
-      process.platform === "darwin"
-        ? false
-        : { color: "#f5f8fc", symbolColor: "#31465a", height: 44 },
+    // Windows 使用页面内的窗口按钮，让标题栏与其余工具按钮保持一致。
+    frame: process.platform !== "win32",
+    ...(process.platform === "darwin" ? { titleBarStyle: "hidden" } : {}),
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -231,7 +276,8 @@ function createWindow() {
   });
 }
 
-app.whenReady()
+app
+  .whenReady()
   .then(async () => {
     if (!hasSingleInstanceLock) return;
     // Windows 安装版把数据库放在实际的 exe 所在目录；开发版与 macOS 仍使用用户数据目录。
@@ -284,32 +330,98 @@ ipcMain.on("settings:save", (event, key, value) => {
   }
 });
 
-ipcMain.handle("catalog", async (_, type, tag, page) => {
-  if (!["movie", "tv"].includes(type)) throw new Error("无效的分类");
-  const key = `${type}:${tag}:${page}`;
+ipcMain.handle("catalog", async (_, type, tag, page, sort) => {
+  if (!["movie", "tv", "anime", "variety"].includes(type))
+    throw new Error("无效的分类");
+  const key = `${type}:${tag}:${sort}:${page}`;
   const cached = catalogCache.get(key);
   if (cached && Date.now() - cached.time < 20 * 60_000) return cached.items;
-  // 豆瓣剧集没有“最新”标签，用热门剧集按时间排序获取新剧。
-  const query = new URLSearchParams({
-    type,
-    tag: type === "tv" && tag === "最新" ? "热门" : tag,
-    sort: tag === "最新" ? "time" : "recommend",
-    page_limit: "24",
-    page_start: String(page * 24),
-  });
-  const data = await (
-    await fetchWithTimeout(
-      `https://movie.douban.com/j/search_subjects?${query}`,
-      12000,
-    )
-  ).json();
-  const items = (data.subjects || []).map((item) => ({
-    id: item.id,
-    title: item.title,
-    poster: item.cover || "",
-    rating: item.rate,
-    episodesInfo: item.episodes_info || "",
-  }));
+  let items;
+  if (type === "anime") {
+    const categories = { TV: "1", OVA: "2", 剧场版: "3", WEB: "5" };
+    const category = categories[tag];
+    const query = new URLSearchParams({
+      // Bangumi 搜索接口单页最多返回 20 条，形式榜也用相同页长。
+      limit: "20",
+      offset: String(page * 20),
+    });
+    const headers = {
+      "User-Agent": `johnshuxian/videoClient/${app.getVersion()} (https://github.com/johnshuxian/videoClient)`,
+      Referer: "https://bgm.tv/",
+      Accept: "application/json",
+    };
+    let data;
+    if (category) {
+      // 形式分类使用 Bangumi 的浏览接口，支持按排名或播出日期排序。
+      query.set("type", "2");
+      query.set("cat", category);
+      query.set("sort", sort === "date" ? "date" : "rank");
+      data = await (
+        await fetchWithTimeout(
+          `https://api.bgm.tv/v0/subjects?${query}`,
+          20000,
+          headers,
+        )
+      ).json();
+    } else {
+      // 题材通过搜索接口筛选 TV 动画；“治愈”只有用户标签，其余使用公共标签。
+      const filter = {
+        type: [2],
+        meta_tags: tag === "治愈" ? ["TV"] : ["TV", tag],
+        ...(tag === "治愈" ? { tag: [tag] } : {}),
+        ...(sort === "heat" ? {} : { rank: [">0"] }),
+      };
+      const response = await fetch(
+        `https://api.bgm.tv/v0/search/subjects?${query}`,
+        {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            keyword: "",
+            sort: sort === "heat" ? "heat" : "rank",
+            filter,
+          }),
+          signal: AbortSignal.timeout(20000),
+        },
+      );
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      data = await response.json();
+    }
+    items = data.data.map((item) => ({
+      id: String(item.id),
+      title: item.name_cn || item.name,
+      poster: item.images?.common || item.images?.large || "",
+      rating: item.rating?.score ? String(item.rating.score) : "",
+      episodesInfo: item.eps ? `${item.eps} 集` : "",
+    }));
+  } else {
+    // 综艺复用豆瓣剧集标签；“最新”使用热门剧集按时间排序。
+    const query = new URLSearchParams({
+      type: type === "variety" ? "tv" : type,
+      tag:
+        type === "variety"
+          ? "综艺"
+          : type === "tv" && tag === "最新"
+            ? "热门"
+            : tag,
+      sort: tag === "最新" ? "time" : "recommend",
+      page_limit: "24",
+      page_start: String(page * 24),
+    });
+    const data = await (
+      await fetchWithTimeout(
+        `https://movie.douban.com/j/search_subjects?${query}`,
+        12000,
+      )
+    ).json();
+    items = (data.subjects || []).map((item) => ({
+      id: item.id,
+      title: item.title,
+      poster: item.cover || "",
+      rating: item.rate,
+      episodesInfo: item.episodes_info || "",
+    }));
+  }
   catalogCache.set(key, { time: Date.now(), items });
   return items;
 });
@@ -498,7 +610,13 @@ ipcMain.handle("detail", async (_, sourceUrl, id) => {
   };
 });
 
-ipcMain.handle("stream-url", (_, url, filterAds) => proxyUrl(url, filterAds));
+ipcMain.handle("stream-url", async (_, url, filterAds) => {
+  const playable = await resolvePlayableUrl(url);
+  return {
+    url: proxyUrl(playable, filterAds),
+    isHls: /\.m3u8(?:$|[?#])/i.test(playable),
+  };
+});
 ipcMain.handle("devices", async () => {
   const [dlna, airplay] = await Promise.allSettled([
     (async () => {
@@ -569,15 +687,17 @@ ipcMain.handle("airplay:pair-finish", async (_, pin) => {
   return true;
 });
 ipcMain.handle("cast", async (_, device, url, title, filterAds) => {
-  const stream = proxyUrl(url, filterAds, getLanIp());
+  const playable = await resolvePlayableUrl(url);
+  const stream = proxyUrl(playable, filterAds, getLanIp());
   await stopCurrentCast();
+  const sessionId = ++castSession;
   if (device.type === "airplay") {
-    await requestAirPlay("play", { id: device.id, url: stream });
-    currentCast = { type: "airplay" };
+    await requestAirPlay("play", { id: device.id, url: stream, sessionId });
+    currentCast = { type: "airplay", device, url, sessionId };
     return true;
   }
   const { DlnaControlPoint, buildDidl } = await import("@sonn-audio/node-upnp");
-  const mime = /\.m3u8(?:$|[?#])/i.test(url)
+  const mime = /\.m3u8(?:$|[?#])/i.test(playable)
     ? "application/vnd.apple.mpegurl"
     : "video/mp4";
   const didl = buildDidl([
@@ -590,21 +710,98 @@ ipcMain.handle("cast", async (_, device, url, title, filterAds) => {
     },
   ]);
   const control = new DlnaControlPoint({ host: device.host });
-  currentCast = { type: "dlna", control };
-  const formats = await control.getSinkContentTypes();
-  if (
-    formats &&
-    !formats.some(
-      (type) =>
-        type.startsWith("video/") ||
-        type.startsWith("application/vnd.apple.mpegurl"),
+  const cast = {
+    type: "dlna",
+    device,
+    control,
+    url,
+    sessionId,
+    seenPlaying: false,
+  };
+  currentCast = cast;
+  try {
+    const formats = await control.getSinkContentTypes();
+    if (
+      formats &&
+      !formats.some(
+        (type) =>
+          type.startsWith("video/") ||
+          type.startsWith("application/vnd.apple.mpegurl"),
+      )
     )
-  ) {
+      throw new Error("此设备仅支持音频播放");
+    try {
+      await control.subscribeEvents(
+        {
+          onTransport: ({ transportState, durationSeconds }) => {
+            if (currentCast !== cast) return;
+            if (durationSeconds) cast.duration = durationSeconds;
+            // 忽略订阅时设备原本的 STOPPED，只在本次播放之后续投。
+            if (transportState === "PLAYING") cast.seenPlaying = true;
+            if (transportState === "STOPPED" && cast.seenPlaying)
+              reportCastEnded(cast);
+          },
+        },
+        getLanIp(),
+      );
+    } catch (error) {
+      console.warn("DLNA 播放状态订阅失败：", error);
+    }
+    const ok = await control.setUri(stream, didl);
+    if (!ok && currentCast === cast) {
+      currentCast = null;
+      control.dispose();
+    }
+    return ok;
+  } catch (error) {
+    if (currentCast === cast) currentCast = null;
     control.dispose();
-    currentCast = null;
-    throw new Error("此设备仅支持音频播放");
+    throw error;
   }
-  return control.setUri(stream, didl);
+});
+ipcMain.handle("cast:progress", async () => {
+  const cast = currentCast;
+  if (!cast) return null;
+  try {
+    let progress;
+    if (cast.type === "airplay") {
+      progress = await requestAirPlay("progress");
+    } else {
+      // node-upnp 暂无读取进度的方法，向它已发现的 AVTransport 地址查询。
+      const { buildSoapRequest, extractTag } =
+        await import("@sonn-audio/node-upnp");
+      const response = await fetch(cast.control.controlUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "text/xml; charset=utf-8",
+          SOAPAction:
+            '"urn:schemas-upnp-org:service:AVTransport:1#GetPositionInfo"',
+        },
+        body: buildSoapRequest(
+          "urn:schemas-upnp-org:service:AVTransport:1",
+          "GetPositionInfo",
+        ),
+        signal: AbortSignal.timeout(3000),
+      });
+      if (!response.ok) return null;
+      const body = await response.text();
+      const parseTime = (value) => {
+        const parts = value?.split(":").map(Number);
+        return parts?.length === 3 && parts.every(Number.isFinite)
+          ? parts[0] * 3600 + parts[1] * 60 + parts[2]
+          : 0;
+      };
+      const position = parseTime(extractTag(body, "RelTime"));
+      const duration =
+        parseTime(extractTag(body, "TrackDuration")) || cast.duration;
+      if (duration > 0) progress = { position, duration };
+    }
+    if (currentCast !== cast || !progress) return null;
+    return { deviceId: cast.device.id, url: cast.url, ...progress };
+  } catch {
+    // 某些电视不会回复进度查询；播放与自动换集仍照常进行。
+    return null;
+  }
 });
 ipcMain.handle("cast:stop", stopCurrentCast);
 ipcMain.on("window:minimize", () => mainWindow.minimize());
@@ -616,10 +813,4 @@ ipcMain.on("window:close", () => mainWindow.close());
 ipcMain.on("theme:set", (_, theme) => {
   const light = theme === "light";
   mainWindow.setBackgroundColor(light ? "#f5f8fc" : "#0b101a");
-  if (process.platform !== "darwin")
-    mainWindow.setTitleBarOverlay({
-      color: light ? "#f5f8fc" : "#0b101a",
-      symbolColor: light ? "#31465a" : "#aab6c7",
-      height: 44,
-    });
 });

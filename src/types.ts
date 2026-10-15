@@ -5,6 +5,7 @@ export type CatalogItem = {
   rating: string;
   episodesInfo: string;
 };
+export type CatalogType = "movie" | "tv" | "anime" | "variety";
 export type Source = { name: string; url: string; isAdult: boolean };
 export type SourceHealth = {
   ok: boolean;
@@ -43,6 +44,7 @@ export type Device = {
 export type HistoryItem = {
   key: string;
   item: SearchItem;
+  detail?: VodDetail;
   line: number;
   episode: number;
   position: number;
@@ -57,9 +59,10 @@ declare global {
       readSetting: (key: string) => unknown;
       saveSetting: (key: string, value: unknown) => void;
       catalog: (
-        type: "movie" | "tv",
+        type: CatalogType,
         tag: string,
         page: number,
+        sort: "rank" | "date" | "heat",
       ) => Promise<CatalogItem[]>;
       importSources: (url: string) => Promise<Source[]>;
       testSource: (source: Source, runId: number) => Promise<SourceHealth>;
@@ -77,7 +80,10 @@ declare global {
         ) => void,
       ) => Promise<{ results: SearchItem[]; failed: string[] }>;
       detail: (sourceUrl: string, id: string) => Promise<VodDetail>;
-      streamUrl: (url: string, filterAds: boolean) => Promise<string>;
+      streamUrl: (
+        url: string,
+        filterAds: boolean,
+      ) => Promise<{ url: string; isHls: boolean }>;
       devices: () => Promise<{ items: Device[]; warnings: string[] }>;
       airplayPairBegin: (id: string) => Promise<{ pinRequired: boolean }>;
       airplayPairFinish: (pin: string) => Promise<boolean>;
@@ -88,6 +94,15 @@ declare global {
         filterAds: boolean,
       ) => Promise<boolean>;
       castStop: () => Promise<void>;
+      castProgress: () => Promise<{
+        deviceId: string;
+        url: string;
+        position: number;
+        duration: number;
+      } | null>;
+      onCastEnded: (
+        callback: (event: { deviceId: string; error: string }) => void,
+      ) => () => void;
       setTheme: (theme: "light" | "dark") => void;
       minimize: () => void;
       maximize: () => void;

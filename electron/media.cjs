@@ -25,6 +25,14 @@ function parseEpisodes(vod) {
   });
 }
 
+// 如意等分享页把实际视频地址放在页面的 main 变量中，地址可能含有 JS 转义的斜杠。
+function videoUrlFromSharePage(html, pageUrl) {
+  const match = html.match(/\bvar\s+main\s*=\s*("(?:\\.|[^"\\])*")/);
+  if (!match) return null;
+  const url = new URL(JSON.parse(match[1]), pageUrl);
+  return ["http:", "https:"].includes(url.protocol) ? url.href : null;
+}
+
 // HLS 相对路径必须按原始清单地址解析，电视和本机播放器才能请求同一个代理。
 function rewriteManifest(body, baseUrl, proxyUrl, filterAds) {
   const lines = body.replace(/\r/g, "").split("\n");
@@ -78,4 +86,4 @@ function rewriteManifest(body, baseUrl, proxyUrl, filterAds) {
     .join("\n");
 }
 
-module.exports = { parseEpisodes, rewriteManifest };
+module.exports = { parseEpisodes, rewriteManifest, videoUrlFromSharePage };
