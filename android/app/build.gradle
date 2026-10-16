@@ -1,5 +1,9 @@
 apply plugin: 'com.android.application'
 
+def appVersion = new groovy.json.JsonSlurper().parse(file('../../package.json')).version
+def versionParts = appVersion.tokenize('.')
+def signingStorePath = System.getenv('ANDROID_KEYSTORE_PATH')
+
 android {
     namespace = "com.shuxian.videoclient"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +11,9 @@ android {
         applicationId "com.shuxian.videoclient"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2
-        versionName "0.2.17"
+        // 版本号与桌面端共用 package.json，递增的 versionCode 允许同签名 APK 覆盖升级。
+        versionCode versionParts[0].toInteger() * 1000000 + versionParts[1].toInteger() * 1000 + versionParts[2].toInteger()
+        versionName appVersion
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,10 +21,21 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    if (signingStorePath) {
+        signingConfigs {
+            release {
+                storeFile file(signingStorePath)
+                storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                keyAlias 'videoclient'
+                keyPassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (signingStorePath) signingConfig signingConfigs.release
         }
     }
 }

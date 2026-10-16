@@ -75,13 +75,36 @@ jobs:
       - run: npm ci
       - run: npm run build:web
       - run: npx cap sync android
-      - name: Build debug APK
+      - name: Restore Android signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [[ -z "$ANDROID_KEYSTORE_BASE64" || -z "$ANDROID_KEYSTORE_PASSWORD" ]]; then
+            echo "::error::Android signing secrets are missing"
+            exit 1
+          fi
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/videoclient-release.jks"
+          chmod 600 "$RUNNER_TEMP/videoclient-release.jks"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/videoclient-release.jks" >> "$GITHUB_ENV"
+      - name: Build signed release APK
         working-directory: android
-        run: ./gradlew assembleDebug
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: ./gradlew assembleRelease
+      - name: Verify APK signature
+        run: |
+          # Pin the certificate so a replaced secret cannot silently change future APK signatures.
+          certs=$("$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs android/app/build/outputs/apk/release/app-release.apk)
+          echo "$certs"
+          if ! grep -Fqi '7f983ef32a1b69a84ed194797813e188c466ddbccee1a743890c6f36b558fed1' <<< "$certs"; then
+            echo "::error::APK certificate does not match the release signing key"
+            exit 1
+          fi
       - name: Prepare APK artifact
         run: |
           mkdir -p release
-          cp android/app/build/outputs/apk/debug/app-debug.apk "release/videoClient-${GITHUB_REF_NAME}-android.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "release/videoClient-${GITHUB_REF_NAME}-android.apk"
       - uses: actions/upload-artifact@v7
         with:
           name: videoClient-${{ github.ref_name }}-android

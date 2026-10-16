@@ -8,5 +8,7 @@ build/airplay/
 build/pyinstaller/
 __pycache__/
 *.tsbuildinfo
+*.jks
+*.keystore
 .DS_Store
 .playwright-cli/
