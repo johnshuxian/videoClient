@@ -12,5 +12,4 @@
   <rect x="22" y="22" width="980" height="980" rx="224" fill="url(#background)"/>
   <rect x="169" y="198" width="686" height="628" rx="150" fill="url(#accent)"/>
   <path d="M423 347c0-27 29-44 53-30l252 158c23 14 23 46 0 60L476 694c-24 15-53-3-53-30V347Z" fill="#09202d"/>
-  <path d="M185 756h297" stroke="#88eff7" stroke-width="24" stroke-linecap="round" opacity=".48"/>
 </svg>

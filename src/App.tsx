@@ -288,14 +288,6 @@ function Player({
           );
         }
         if (window.videoAPI.platform === "android") {
-          const exitButton = document.createElement("button");
-          exitButton.className = "mobile-player-exit-fullscreen";
-          exitButton.type = "button";
-          exitButton.textContent = "退出全屏";
-          exitButton.onclick = () => {
-            if (art) art.fullscreenWeb = false;
-          };
-          art.template.$player.appendChild(exitButton);
           art.on("fullscreenWeb", (fullscreen) => {
             window.videoAPI.setVideoFullscreen(fullscreen);
           });

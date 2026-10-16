@@ -15,6 +15,7 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.StringReader;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.HttpURLConnection;
@@ -30,10 +31,12 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
 
 @CapacitorPlugin(name = "Dlna")
 public class DlnaPlugin extends Plugin {
@@ -326,9 +329,11 @@ public class DlnaPlugin extends Plugin {
 
     private Document parseXml(InputStream input) throws Exception {
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
         factory.setExpandEntityReferences(false);
-        return factory.newDocumentBuilder().parse(input);
+        DocumentBuilder builder = factory.newDocumentBuilder();
+        // Android 的 XML 解析器不支持 disallow-doctype-decl；拦截外部实体避免读取网络或本地文件。
+        builder.setEntityResolver((publicId, systemId) -> new InputSource(new StringReader("")));
+        return builder.parse(input);
     }
 
     private String text(Element parent, String tag) {
