@@ -1,7 +1,12 @@
 package com.shuxian.videoclient;
 
 import android.content.Context;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.net.wifi.WifiManager;
+import android.os.SystemClock;
+import android.util.Log;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -16,7 +21,7 @@ import java.net.HttpURLConnection;
 import java.net.InetAddress;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -33,6 +38,12 @@ import org.w3c.dom.NodeList;
 @CapacitorPlugin(name = "Dlna")
 public class DlnaPlugin extends Plugin {
     private static final String SERVICE = "urn:schemas-upnp-org:service:AVTransport:1";
+    private static final String SERVICE_PREFIX = "urn:schemas-upnp-org:service:AVTransport:";
+    private static final String[] SEARCH_TARGETS = {
+            "urn:schemas-upnp-org:device:MediaRenderer:1",
+            SERVICE,
+            "ssdp:all"
+    };
     private final ExecutorService workers = Executors.newSingleThreadExecutor();
     private final ScheduledExecutorService monitor = Executors.newSingleThreadScheduledExecutor();
     private final Map<String, Renderer> renderers = new ConcurrentHashMap<>();
@@ -47,12 +58,16 @@ public class DlnaPlugin extends Plugin {
         final String name;
         final String host;
         final URL control;
+        final Network network;
+        final String serviceType;
 
-        Renderer(String id, String name, String host, URL control) {
+        Renderer(String id, String name, String host, URL control, Network network, String serviceType) {
             this.id = id;
             this.name = name;
             this.host = host;
             this.control = control;
+            this.network = network;
+            this.serviceType = serviceType;
         }
     }
 
@@ -60,23 +75,44 @@ public class DlnaPlugin extends Plugin {
     public void devices(PluginCall call) {
         workers.execute(() -> {
             JSArray items = new JSArray();
-            Set<String> locations = new HashSet<>();
+            Set<String> locations = new LinkedHashSet<>();
+            int descriptionErrors = 0;
             WifiManager wifi = (WifiManager) getContext().getApplicationContext().getSystemService(Context.WIFI_SERVICE);
             WifiManager.MulticastLock lock = wifi == null ? null : wifi.createMulticastLock("videoclient-dlna");
+            ConnectivityManager connectivity = (ConnectivityManager) getContext().getSystemService(Context.CONNECTIVITY_SERVICE);
+            Network lanNetwork = null;
+            if (connectivity != null) {
+                for (Network network : connectivity.getAllNetworks()) {
+                    NetworkCapabilities capabilities = connectivity.getNetworkCapabilities(network);
+                    if (capabilities != null && (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+                            || capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))) {
+                        lanNetwork = network;
+                        break;
+                    }
+                }
+            }
             try {
                 if (lock != null) lock.acquire();
-                // SSDP 搜索的响应直接返回手机的 UDP 端口。
+                // 优先使用 Wi-Fi/以太网，避免手机默认走移动数据或 VPN 时把组播发错网络。
                 try (DatagramSocket socket = new DatagramSocket()) {
-                    socket.setSoTimeout(500);
-                    byte[] search = ("M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\n"
-                            + "MAN: \"ssdp:discover\"\r\nMX: 2\r\nST: urn:schemas-upnp-org:device:MediaRenderer:1\r\n\r\n")
-                            .getBytes(StandardCharsets.US_ASCII);
-                    DatagramPacket packet = new DatagramPacket(search, search.length,
-                            InetAddress.getByName("239.255.255.250"), 1900);
-                    socket.send(packet);
-                    socket.send(packet);
-                    long deadline = System.currentTimeMillis() + 3000;
-                    while (System.currentTimeMillis() < deadline) {
+                    if (lanNetwork != null) lanNetwork.bindSocket(socket);
+                    InetAddress multicast = InetAddress.getByName("239.255.255.250");
+                    long started = SystemClock.elapsedRealtime();
+                    long deadline = started + 4000;
+                    int bursts = 0;
+                    while (SystemClock.elapsedRealtime() < deadline) {
+                        long now = SystemClock.elapsedRealtime();
+                        if (bursts < 3 && now >= started + bursts * 1000L) {
+                            // 电视可能只回应 AVTransport 或 ssdp:all；分三轮发送以容忍丢包。
+                            for (String target : SEARCH_TARGETS) {
+                                byte[] search = ("M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\n"
+                                        + "MAN: \"ssdp:discover\"\r\nMX: 2\r\nST: " + target + "\r\n\r\n")
+                                        .getBytes(StandardCharsets.US_ASCII);
+                                socket.send(new DatagramPacket(search, search.length, multicast, 1900));
+                            }
+                            bursts++;
+                        }
+                        socket.setSoTimeout((int) Math.max(1, Math.min(250, deadline - now)));
                         byte[] response = new byte[4096];
                         DatagramPacket reply = new DatagramPacket(response, response.length);
                         try {
@@ -86,14 +122,14 @@ public class DlnaPlugin extends Plugin {
                         }
                         String headers = new String(reply.getData(), 0, reply.getLength(), StandardCharsets.US_ASCII);
                         for (String line : headers.split("\r?\n")) {
-                            if (line.regionMatches(true, 0, "location:", 0, 9) && locations.size() < 20)
+                            if (line.regionMatches(true, 0, "location:", 0, 9) && locations.size() < 40)
                                 locations.add(line.substring(9).trim());
                         }
                     }
                 }
                 for (String location : locations) {
                     try {
-                        Renderer renderer = describe(location);
+                        Renderer renderer = describe(location, lanNetwork);
                         if (renderer == null) continue;
                         renderers.put(renderer.id, renderer);
                         JSObject item = new JSObject();
@@ -103,13 +139,22 @@ public class DlnaPlugin extends Plugin {
                         item.put("type", "dlna");
                         item.put("paired", true);
                         items.put(item);
-                    } catch (Exception ignored) {
-                        // 网络上的其他 SSDP 设备可能没有视频播放服务。
+                    } catch (Exception error) {
+                        descriptionErrors++;
+                        Log.w("Dlna", "读取设备描述失败：" + location, error);
                     }
                 }
                 JSObject result = new JSObject();
                 result.put("items", items);
-                result.put("warnings", new JSArray());
+                JSArray warnings = new JSArray();
+                if (items.length() == 0) {
+                    warnings.put(locations.isEmpty()
+                            ? "未收到 SSDP 响应；请确认手机和电视在同一局域网，且路由器未隔离设备或屏蔽组播。"
+                            : descriptionErrors > 0
+                                    ? "收到设备响应，但读取设备信息失败；请检查局域网设备互访。"
+                                    : "收到设备响应，但没有找到支持 DLNA 视频播放的设备。");
+                }
+                result.put("warnings", warnings);
                 call.resolve(result);
             } catch (Exception error) {
                 call.reject("搜索电视失败：" + error.getMessage());
@@ -119,10 +164,11 @@ public class DlnaPlugin extends Plugin {
         });
     }
 
-    private Renderer describe(String location) throws Exception {
+    private Renderer describe(String location, Network network) throws Exception {
         URL url = new URL(location);
         if (!url.getProtocol().equals("http") && !url.getProtocol().equals("https")) return null;
-        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        HttpURLConnection connection = (HttpURLConnection) (network == null
+                ? url.openConnection() : network.openConnection(url));
         connection.setConnectTimeout(1800);
         connection.setReadTimeout(1800);
         try (InputStream input = connection.getInputStream()) {
@@ -133,9 +179,10 @@ public class DlnaPlugin extends Plugin {
             NodeList services = document.getElementsByTagName("service");
             for (int index = 0; index < services.getLength(); index++) {
                 Element service = (Element) services.item(index);
-                if (!text(service, "serviceType").startsWith(SERVICE)) continue;
+                String serviceType = text(service, "serviceType");
+                if (!serviceType.startsWith(SERVICE_PREFIX)) continue;
                 URL control = new URL(baseUrl, text(service, "controlURL"));
-                return new Renderer(location, name.isEmpty() ? url.getHost() : name, url.getHost(), control);
+                return new Renderer(location, name.isEmpty() ? url.getHost() : name, url.getHost(), control, network, serviceType);
             }
             return null;
         } finally {
@@ -253,14 +300,15 @@ public class DlnaPlugin extends Plugin {
         String body = "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
                 + "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" "
                 + "s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">"
-                + "<s:Body><u:" + action + " xmlns:u=\"" + SERVICE + "\">"
+                + "<s:Body><u:" + action + " xmlns:u=\"" + renderer.serviceType + "\">"
                 + "<InstanceID>0</InstanceID>" + arguments + "</u:" + action + "></s:Body></s:Envelope>";
-        HttpURLConnection connection = (HttpURLConnection) renderer.control.openConnection();
+        HttpURLConnection connection = (HttpURLConnection) (renderer.network == null
+                ? renderer.control.openConnection() : renderer.network.openConnection(renderer.control));
         connection.setConnectTimeout(4000);
         connection.setReadTimeout(5000);
         connection.setRequestMethod("POST");
         connection.setRequestProperty("Content-Type", "text/xml; charset=utf-8");
-        connection.setRequestProperty("SOAPACTION", "\"" + SERVICE + "#" + action + "\"");
+        connection.setRequestProperty("SOAPACTION", "\"" + renderer.serviceType + "#" + action + "\"");
         connection.setDoOutput(true);
         try {
             try (OutputStream output = connection.getOutputStream()) {

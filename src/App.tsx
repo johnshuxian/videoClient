@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { version } from "../package.json";
 import type Artplayer from "artplayer";
 import type Hls from "hls.js";
 import { App as CapacitorApp } from "@capacitor/app";
@@ -188,6 +189,7 @@ function Player({
   resume,
   onProgress,
   onEnded,
+  onFailure,
   playerInstance,
 }: {
   url: string;
@@ -195,9 +197,12 @@ function Player({
   resume: number;
   onProgress: (position: number, duration: number) => void;
   onEnded: () => void;
+  onFailure: (position: number) => boolean;
   playerInstance: React.RefObject<Artplayer | null>;
 }) {
   const playerRef = useRef<HTMLDivElement>(null);
+  const onFailureRef = useRef(onFailure);
+  onFailureRef.current = onFailure;
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -206,7 +211,22 @@ function Player({
     let art: Artplayer | undefined;
     let hls: Hls | undefined;
     let cancelled = false;
+    let failed = false;
+    let startupTimeout: number;
+    let stallTimeout: number | undefined;
     setError("");
+    const failPlayback = (message: string) => {
+      if (cancelled || failed) return;
+      failed = true;
+      window.clearTimeout(startupTimeout);
+      window.clearTimeout(stallTimeout);
+      if (!onFailureRef.current(art?.currentTime || resume)) setError(message);
+    };
+    // 有些失效线路既不返回视频数据，也不触发 media error，需要限定首次加载时间。
+    startupTimeout = window.setTimeout(
+      () => failPlayback("视频加载超时，请切换线路。"),
+      30000,
+    );
     window.videoAPI
       .streamUrl(url, filterAds)
       .then(async (stream) => {
@@ -233,13 +253,12 @@ function Player({
                 hls.loadSource(source);
                 hls.attachMedia(video);
                 hls.on(Hls.Events.ERROR, (_, data) => {
-                  if (data.fatal && !cancelled)
-                    setError(`视频加载失败：${data.details}`);
+                  if (data.fatal) failPlayback(`视频加载失败：${data.details}`);
                 });
               } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
                 video.src = source;
               } else {
-                setError("当前系统不支持 HLS 视频播放。");
+                failPlayback("当前系统不支持 HLS 视频播放。");
               }
             },
           },
@@ -255,6 +274,19 @@ function Player({
           fullscreenWeb: true,
         });
         playerInstance.current = art;
+        if (window.videoAPI.platform !== "android") {
+          art.controls.fullscreen?.addEventListener(
+            "click",
+            (event) => {
+              if (!art?.fullscreenWeb) return;
+              // 先把播放器放回页面，再请求系统全屏；全屏后移动节点会使浏览器立刻退出全屏。
+              event.stopImmediatePropagation();
+              art.fullscreenWeb = false;
+              art.fullscreen = true;
+            },
+            true,
+          );
+        }
         if (window.videoAPI.platform === "android") {
           const exitButton = document.createElement("button");
           exitButton.className = "mobile-player-exit-fullscreen";
@@ -275,6 +307,31 @@ function Player({
         art.on("video:timeupdate", () => {
           if (art) onProgress(art.currentTime, art.duration || 0);
         });
+        art.on("video:canplay", () => {
+          window.clearTimeout(startupTimeout);
+          window.clearTimeout(stallTimeout);
+          stallTimeout = undefined;
+        });
+        art.on("video:playing", () => {
+          window.clearTimeout(startupTimeout);
+          window.clearTimeout(stallTimeout);
+          stallTimeout = undefined;
+        });
+        // 播放途中若一直转圈且没有触发 error，也继续尝试右侧的其他线路。
+        const watchStall = () => {
+          if (stallTimeout !== undefined) return;
+          stallTimeout = window.setTimeout(() => {
+            if (art && !art.video.paused && !art.video.ended)
+              failPlayback("视频缓冲超时，请切换线路。");
+          }, 30000);
+        };
+        art.on("video:waiting", watchStall);
+        art.on("video:stalled", watchStall);
+        art.on("video:pause", () => {
+          window.clearTimeout(startupTimeout);
+          window.clearTimeout(stallTimeout);
+          stallTimeout = undefined;
+        });
         art.on("video:ended", onEnded);
         art.on("video:error", () => {
           const code = art?.video.error?.code;
@@ -286,14 +343,16 @@ function Player({
                 : code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
                   ? "该地址未返回可播放的视频流，可能是网页播放地址或不支持的格式。"
                   : "该线路暂时无法播放，请切换线路或集数。";
-          if (!cancelled) setError((previous) => previous || message);
+          failPlayback(message);
         });
       })
       .catch((error) => {
-        if (!cancelled) setError(error.message);
+        failPlayback(error.message);
       });
     return () => {
       cancelled = true;
+      window.clearTimeout(startupTimeout);
+      window.clearTimeout(stallTimeout);
       hls?.destroy();
       // 播放器在网页全屏时会被移到 body，销毁前须先放回容器。
       if (art?.fullscreenWeb) art.fullscreenWeb = false;
@@ -405,6 +464,9 @@ export default function App() {
   const progressSaved = useRef(0);
   const pageScroll = useRef<HTMLDivElement>(null);
   const playerInstance = useRef<Artplayer | null>(null);
+  const failedLines = useRef(new Set<number>());
+  const fallbackPosition = useRef<number | null>(null);
+  const [playbackSerial, setPlaybackSerial] = useState(0);
   const loadMoreTrigger = useRef<HTMLDivElement>(null);
   const customSourcePicker = useRef<HTMLDivElement>(null);
   const customCategoryCache = useRef(new Map<string, SourceCategory[]>());
@@ -856,6 +918,8 @@ export default function App() {
 
   async function openDetail(item: SearchItem, resumeItem?: HistoryItem) {
     const serial = ++detailSerial.current;
+    failedLines.current.clear();
+    fallbackPosition.current = null;
     const cachedDetail = resumeItem?.detail;
     const canResume = Boolean(
       cachedDetail?.lines[resumeItem?.line ?? 0]?.episodes[
@@ -994,8 +1058,11 @@ export default function App() {
       detail &&
       episode !== null &&
       episode + 1 < detail.lines[line].episodes.length
-    )
+    ) {
+      failedLines.current.clear();
+      fallbackPosition.current = null;
       setEpisode(episode + 1);
+    }
   }
 
   async function scanDevices() {
@@ -1478,7 +1545,10 @@ export default function App() {
                     !catalogError &&
                     catalogHasMore &&
                     catalog.length > 0 && (
-                      <div ref={loadMoreTrigger} className="load-more-trigger" />
+                      <div
+                        ref={loadMoreTrigger}
+                        className="load-more-trigger"
+                      />
                     )}
                 </section>
               </>
@@ -1709,7 +1779,10 @@ export default function App() {
                       !customError &&
                       customItems.length > 0 &&
                       customPage < customPageCount && (
-                        <div ref={loadMoreTrigger} className="load-more-trigger" />
+                        <div
+                          ref={loadMoreTrigger}
+                          className="load-more-trigger"
+                        />
                       )}
                   </>
                 )}
@@ -1994,7 +2067,11 @@ export default function App() {
                           )}
                           <button
                             className="primary-button"
-                            onClick={() => setEpisode(0)}
+                            onClick={() => {
+                              failedLines.current.clear();
+                              fallbackPosition.current = null;
+                              setEpisode(0);
+                            }}
                             disabled={!playing}
                           >
                             <Play size={17} fill="currentColor" />{" "}
@@ -2022,17 +2099,50 @@ export default function App() {
                             </div>
                           ) : (
                             <Player
-                              key={`${playing.url}-${filterAds}`}
+                              key={`${line}-${episode}-${playing.url}-${filterAds}-${playbackSerial}`}
                               url={playing.url}
                               filterAds={filterAds}
                               resume={
-                                selectedHistory?.line === line &&
+                                fallbackPosition.current ??
+                                (selectedHistory?.line === line &&
                                 selectedHistory.episode === episode
                                   ? selectedHistory.position
-                                  : 0
+                                  : 0)
                               }
                               onProgress={recordProgress}
                               onEnded={nextEpisode}
+                              onFailure={(position) => {
+                                if (!detail || episode === null) return false;
+                                failedLines.current.add(line);
+                                const currentEpisode =
+                                  detail.lines[line].episodes[episode];
+                                // 优先保持集名一致；线路命名不同但集数一致时使用相同序号。
+                                for (
+                                  let offset = 1;
+                                  offset < detail.lines.length;
+                                  offset++
+                                ) {
+                                  const nextLine =
+                                    (line + offset) % detail.lines.length;
+                                  if (failedLines.current.has(nextLine))
+                                    continue;
+                                  const episodes =
+                                    detail.lines[nextLine].episodes;
+                                  let nextEpisode = episodes.findIndex(
+                                    (item) =>
+                                      item.label === currentEpisode.label &&
+                                      item.url,
+                                  );
+                                  if (nextEpisode < 0 && episodes[episode]?.url)
+                                    nextEpisode = episode;
+                                  if (nextEpisode < 0) continue;
+                                  fallbackPosition.current = position;
+                                  setLine(nextLine);
+                                  setEpisode(nextEpisode);
+                                  return true;
+                                }
+                                return false;
+                              }}
                               playerInstance={playerInstance}
                             />
                           )}
@@ -2051,7 +2161,11 @@ export default function App() {
                                 {episode + 1 <
                                   detail.lines[line].episodes.length && (
                                   <button
-                                    onClick={() => setEpisode(episode + 1)}
+                                    onClick={() => {
+                                      failedLines.current.clear();
+                                      fallbackPosition.current = null;
+                                      setEpisode(episode + 1);
+                                    }}
                                   >
                                     <SkipForward size={17} /> 下一集
                                   </button>
@@ -2112,6 +2226,8 @@ export default function App() {
                               className={line === index ? "active" : ""}
                               disabled={!!casting}
                               onClick={() => {
+                                failedLines.current.clear();
+                                fallbackPosition.current = null;
                                 setLine(index);
                                 setEpisode(null);
                               }}
@@ -2138,7 +2254,12 @@ export default function App() {
                               key={`${item.url}-${index}`}
                               className={episode === index ? "active" : ""}
                               disabled={!!casting}
-                              onClick={() => setEpisode(index)}
+                              onClick={() => {
+                                failedLines.current.clear();
+                                fallbackPosition.current = null;
+                                setEpisode(index);
+                                setPlaybackSerial((current) => current + 1);
+                              }}
                               title={item.label}
                             >
                               {item.label}
@@ -2173,6 +2294,7 @@ export default function App() {
                 <span>偏好设置</span>
                 <h2>让观影更顺手</h2>
               </div>
+              <small className="settings-version">v{version}</small>
             </div>
             <div className="settings-body">
               <h3>外观</h3>
@@ -2200,6 +2322,8 @@ export default function App() {
                   type="checkbox"
                   checked={filterAds}
                   onChange={(event) => {
+                    failedLines.current.clear();
+                    fallbackPosition.current = null;
                     setFilterAds(event.target.checked);
                     saveStorage("filter-ads", event.target.checked);
                   }}

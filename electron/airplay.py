@@ -54,6 +54,7 @@ async def handle(command):
         credentials = command.get("credentials", {})
         # 局域网首次授权和部分电视的 Bonjour 响应需要比三秒更长的发现窗口。
         found = await pyatv.scan(asyncio.get_running_loop(), timeout=5, protocol=Protocol.AirPlay)
+        print(f"AirPlay 扫描收到 {len(found)} 个设备", file=sys.stderr, flush=True)
         devices = {}
         result = []
         for device in found:
@@ -66,6 +67,7 @@ async def handle(command):
                 | AirPlayFlags.SupportsAirPlayVideoV2
                 | AirPlayFlags.SupportsAirPlayVideoPlayQueue
             ):
+                print(f"AirPlay 设备 {device.name} 未声明视频能力", file=sys.stderr, flush=True)
                 continue
             identifier = device.identifier or str(device.address)
             devices[identifier] = device

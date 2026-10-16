@@ -1075,25 +1075,29 @@ a {
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
-/* 详情页和选集列表使用窄滚动条，避免占用按钮和内容的空间。 */
+/* 各滚动区域使用相同的窄滚动条，避免设置面板出现系统默认样式。 */
 .page-scroll::-webkit-scrollbar,
 .detail-scroll::-webkit-scrollbar,
+.settings-body::-webkit-scrollbar,
 .episode-list::-webkit-scrollbar {
   width: 6px;
 }
 .page-scroll::-webkit-scrollbar-track,
 .detail-scroll::-webkit-scrollbar-track,
+.settings-body::-webkit-scrollbar-track,
 .episode-list::-webkit-scrollbar-track {
   background: transparent;
 }
 .page-scroll::-webkit-scrollbar-thumb,
 .detail-scroll::-webkit-scrollbar-thumb,
+.settings-body::-webkit-scrollbar-thumb,
 .episode-list::-webkit-scrollbar-thumb {
   background: #506778;
   border-radius: 6px;
 }
 .page-scroll::-webkit-scrollbar-button,
 .detail-scroll::-webkit-scrollbar-button,
+.settings-body::-webkit-scrollbar-button,
 .episode-list::-webkit-scrollbar-button {
   display: none;
 }
@@ -1491,8 +1495,17 @@ a {
   margin: 5px 0 0;
   font-size: 20px;
 }
+.settings-version {
+  margin-top: 3px;
+  color: #8199aa;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
 .settings-body {
-  overflow: auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
   padding: 23px 25px;
 }
 .settings-body h3 {
@@ -2245,6 +2258,7 @@ a {
 }
 .light .page-scroll::-webkit-scrollbar-thumb,
 .light .detail-scroll::-webkit-scrollbar-thumb,
+.light .settings-body::-webkit-scrollbar-thumb,
 .light .episode-list::-webkit-scrollbar-thumb {
   background: #aabdc8;
 }

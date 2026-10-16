@@ -44,6 +44,8 @@ export type Device = {
   id: string;
   name: string;
   host: string;
+  localAddress?: string;
+  controlUrl?: string;
   type: "dlna" | "airplay";
   paired: boolean;
 };

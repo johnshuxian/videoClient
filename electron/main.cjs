@@ -1,6 +1,7 @@
 const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
 const path = require("node:path");
 const http = require("node:http");
+const dgram = require("node:dgram");
 const os = require("node:os");
 const crypto = require("node:crypto");
 const { Readable } = require("node:stream");
@@ -16,6 +17,7 @@ const {
   setAirPlayEventHandler,
 } = require("./airplay.cjs");
 const { createSettingsStore } = require("./settings.cjs");
+const { discoverDlnaOnInterfaces } = require("./dlna-discovery.cjs");
 
 const requestHeaders = {
   "User-Agent":
@@ -81,7 +83,24 @@ async function fetchWithTimeout(url, ms = 9000, headers = {}, cancelSignal) {
   return response;
 }
 
-function getLanIp() {
+async function getLanIp(deviceHost) {
+  if (deviceHost) {
+    const socket = dgram.createSocket("udp4");
+    try {
+      // UDP connect 不发包，只让系统选择通往当前电视的本机网卡。
+      await new Promise((resolve, reject) => {
+        socket.once("error", reject);
+        socket.connect(1900, deviceHost, () => {
+          socket.off("error", reject);
+          resolve();
+        });
+      });
+      const address = socket.address().address;
+      if (address !== "0.0.0.0") return address;
+    } finally {
+      socket.close();
+    }
+  }
   for (const addresses of Object.values(os.networkInterfaces())) {
     for (const address of addresses || []) {
       if (address.family === "IPv4" && !address.internal)
@@ -673,13 +692,49 @@ ipcMain.handle("devices", async () => {
     (async () => {
       const { discoverDlnaDevices, DlnaControlPoint } =
         await import("@sonn-audio/node-upnp");
-      const found = await discoverDlnaDevices({ timeoutMs: 3000 });
+      let found;
+      if (process.platform === "darwin") {
+        // 同时扫描默认出口和各网卡，避免 VPN 或多网卡让整个设备列表为空。
+        const [defaultScan, interfaceScan] = await Promise.allSettled([
+          discoverDlnaDevices({ timeoutMs: 3000 }),
+          discoverDlnaOnInterfaces(),
+        ]);
+        if (defaultScan.status === "rejected")
+          console.warn("DLNA 默认扫描失败：", defaultScan.reason);
+        if (interfaceScan.status === "rejected")
+          console.warn("DLNA 逐网卡扫描失败：", interfaceScan.reason);
+        if (
+          defaultScan.status === "rejected" &&
+          interfaceScan.status === "rejected"
+        )
+          throw new Error("默认扫描与逐网卡扫描均失败");
+        const byLocation = new Map();
+        for (const device of [
+          ...(defaultScan.status === "fulfilled" ? defaultScan.value : []),
+          ...(interfaceScan.status === "fulfilled" ? interfaceScan.value : []),
+        ]) {
+          if (
+            !byLocation.has(device.location) ||
+            !byLocation.get(device.location).controlUrl ||
+            device.localAddress
+          )
+            byLocation.set(device.location, device);
+        }
+        found = [...byLocation.values()];
+      } else {
+        found = await discoverDlnaDevices({ timeoutMs: 3000 });
+      }
       const checked = await Promise.all(
         found.map(async (device) => {
+          if (process.platform === "darwin" && !device.controlUrl) return null;
           const control = new DlnaControlPoint({ host: device.host });
           try {
             // 同一网络也会发现音箱；有明确能力表时只展示支持视频的设备。
-            const formats = await control.getSinkContentTypes();
+            // macOS 已完成逐网卡搜索时，不再用默认出口重新发现并丢失结果。
+            const formats =
+              process.platform === "darwin"
+                ? null
+                : await control.getSinkContentTypes();
             if (
               formats &&
               !formats.some(
@@ -693,9 +748,14 @@ ipcMain.handle("devices", async () => {
               id: device.location,
               name: device.name || device.host,
               host: device.host,
+              localAddress: device.localAddress,
+              controlUrl: device.controlUrl,
               type: "dlna",
               paired: true,
             };
+          } catch (error) {
+            console.warn(`DLNA 设备 ${device.host} 能力检查失败：`, error);
+            return null;
           } finally {
             control.dispose();
           }
@@ -739,7 +799,8 @@ ipcMain.handle("airplay:pair-finish", async (_, pin) => {
 });
 ipcMain.handle("cast", async (_, device, url, title, filterAds) => {
   const playable = await resolvePlayableUrl(url);
-  const stream = proxyUrl(playable, filterAds, getLanIp());
+  const localIp = device.localAddress || (await getLanIp(device.host));
+  const stream = proxyUrl(playable, filterAds, localIp);
   await stopCurrentCast();
   const sessionId = ++castSession;
   if (device.type === "airplay") {
@@ -760,7 +821,10 @@ ipcMain.handle("cast", async (_, device, url, title, filterAds) => {
       resources: [{ url: stream, protocolInfo: `http-get:*:${mime}:*` }],
     },
   ]);
-  const control = new DlnaControlPoint({ host: device.host });
+  const control = new DlnaControlPoint({
+    host: device.host,
+    controlUrl: process.platform === "darwin" ? device.controlUrl : undefined,
+  });
   const cast = {
     type: "dlna",
     device,
@@ -793,7 +857,7 @@ ipcMain.handle("cast", async (_, device, url, title, filterAds) => {
               reportCastEnded(cast);
           },
         },
-        getLanIp(),
+        localIp,
       );
     } catch (error) {
       console.warn("DLNA 播放状态订阅失败：", error);

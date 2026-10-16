@@ -25,6 +25,13 @@ function requestAirPlay(action, data = {}) {
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
     });
+    const child = helper;
+    child.stderr.on("data", (output) =>
+      console.warn(`AirPlay 助手：${String(output).trim()}`),
+    );
+    child.stdin.on("error", (error) =>
+      console.warn("AirPlay 助手输入失败：", error),
+    );
     readline.createInterface({ input: helper.stdout }).on("line", (line) => {
       let message;
       try {
@@ -43,15 +50,18 @@ function requestAirPlay(action, data = {}) {
       if (message.error) waiting.reject(new Error(message.error));
       else waiting.resolve(message.result);
     });
-    helper.on("exit", () => {
-      helper = null;
+    const failPending = (error) => {
+      if (helper === child) helper = null;
       for (const waiting of pending.values()) {
         clearTimeout(waiting.timer);
-        waiting.reject(new Error("AirPlay 助手已退出"));
+        waiting.reject(error);
       }
       pending.clear();
-    });
-    helper.on("error", () => helper?.kill());
+    };
+    child.on("exit", () => failPending(new Error("AirPlay 助手已退出")));
+    child.on("error", (error) =>
+      failPending(new Error(`AirPlay 助手无法启动：${error.message}`)),
+    );
   }
 
   const id = ++serial;
