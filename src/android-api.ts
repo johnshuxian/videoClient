@@ -39,6 +39,7 @@ type Dlna = {
   ): Promise<{ remove(): Promise<void> }>;
 };
 type AppStatusBar = {
+  deviceInfo(): Promise<{ isTv: boolean }>;
   setTheme(options: { theme: "light" | "dark" }): Promise<void>;
   setFullscreen(options: { fullscreen: boolean }): Promise<void>;
 };
@@ -152,6 +153,9 @@ function searchItem(vod: VodEntry, source: Source): SearchItem {
 }
 
 export async function createAndroidVideoAPI(): Promise<Window["videoAPI"]> {
+  // React 挂载前标记电视设备，首屏直接使用大屏布局和遥控器导航。
+  const { isTv } = await statusBar.deviceInfo();
+  if (isTv) document.body.classList.add("tv-body");
   const sqlite = new SQLiteConnection(CapacitorSQLite);
   const db = (await sqlite.isConnection("settings", false)).result
     ? await sqlite.retrieveConnection("settings", false)
@@ -171,7 +175,8 @@ export async function createAndroidVideoAPI(): Promise<Window["videoAPI"]> {
   for (const row of saved.values || [])
     settings.set(row.key, JSON.parse(row.value));
   // 首次安装默认深色；已有设置仍优先，避免覆盖用户手动选择。
-  const initialTheme = settings.get("color-theme") === "light" ? "light" : "dark";
+  const initialTheme =
+    settings.get("color-theme") === "light" ? "light" : "dark";
   document.documentElement.dataset.theme = initialTheme;
   await statusBar.setTheme({ theme: initialTheme });
   let writes = Promise.resolve();
@@ -531,14 +536,14 @@ export async function createAndroidVideoAPI(): Promise<Window["videoAPI"]> {
       };
     },
     setTheme: (theme) => {
-      void statusBar.setTheme({ theme }).catch((error) =>
-        console.error("状态栏颜色更新失败", error),
-      );
+      void statusBar
+        .setTheme({ theme })
+        .catch((error) => console.error("状态栏颜色更新失败", error));
     },
     setVideoFullscreen: (fullscreen) => {
-      void statusBar.setFullscreen({ fullscreen }).catch((error) =>
-        console.error("播放时状态栏更新失败", error),
-      );
+      void statusBar
+        .setFullscreen({ fullscreen })
+        .catch((error) => console.error("播放时状态栏更新失败", error));
     },
     minimize: () => undefined,
     maximize: () => undefined,

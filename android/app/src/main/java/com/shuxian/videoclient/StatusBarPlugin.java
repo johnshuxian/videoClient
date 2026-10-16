@@ -10,6 +10,7 @@ import android.view.Window;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
+import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
@@ -26,6 +27,19 @@ public class StatusBarPlugin extends Plugin {
     public void load() {
         super.load();
         light = !getActivity().getPreferences(Context.MODE_PRIVATE).getBoolean("dark", true);
+    }
+
+    @PluginMethod
+    public void deviceInfo(PluginCall call) {
+        JSObject result = new JSObject();
+        result.put("isTv", isTelevision(getActivity()));
+        call.resolve(result);
+    }
+
+    private static boolean isTelevision(Context context) {
+        int type = context.getResources().getConfiguration().uiMode & Configuration.UI_MODE_TYPE_MASK;
+        return type == Configuration.UI_MODE_TYPE_TELEVISION
+            || context.getPackageManager().hasSystemFeature("android.software.leanback");
     }
 
     @PluginMethod
@@ -65,6 +79,7 @@ public class StatusBarPlugin extends Plugin {
 
     static void applyColor(Activity activity, boolean light, boolean fullscreen) {
         Window window = activity.getWindow();
+        boolean isTv = isTelevision(activity);
         // 播放全屏隐藏系统栏；退出后恢复系统栏及用户选择的主题。
         int color = fullscreen ? Color.BLACK : light ? Color.rgb(237, 243, 247) : Color.rgb(11, 16, 26);
         // Android 15 的状态栏透明，底色来自应用窗口。
@@ -72,7 +87,7 @@ public class StatusBarPlugin extends Plugin {
         if (Build.VERSION.SDK_INT < 35) window.setStatusBarColor(color);
         WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(window, window.getDecorView());
         controller.setAppearanceLightStatusBars(light && !fullscreen);
-        if (fullscreen) {
+        if (fullscreen || isTv) {
             controller.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
             controller.hide(WindowInsetsCompat.Type.systemBars());
         } else {

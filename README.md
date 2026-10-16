@@ -1,6 +1,6 @@
 # 影窗
 
-Windows / macOS 桌面与 Android 手机、平板点播客户端。电影、电视剧和综艺推荐来自豆瓣，番剧榜单来自 Bangumi。初次安装不内置点播源，需要在「播放设置」中粘贴 VOD 订阅地址并导入，例如[这份 vod.json 源清单](https://raw.githubusercontent.com/johnshuxian/IPTVM3U/refs/heads/master/vod.json)。
+Windows / macOS 桌面与 Android 手机、平板、电视点播客户端。电影、电视剧和综艺推荐来自豆瓣，番剧榜单来自 Bangumi。初次安装不内置点播源，需要在「播放设置」中粘贴 VOD 订阅地址并导入，例如[这份 vod.json 源清单](https://raw.githubusercontent.com/johnshuxian/IPTVM3U/refs/heads/master/vod.json)。
 
 ## 功能
 
@@ -41,7 +41,9 @@ Android 版需要 JDK 21、Android SDK Platform 36 和 Build Tools 35.0.0。在 
 npm run dist:android
 ```
 
-调试签名 APK 输出到 `android/app/build/outputs/apk/debug/app-debug.apk`，可安装到 Android 手机和平板。安卓端在原生 SQLite 中保存设置和播放记录，支持跟随设备旋转、手机端顶部分类与底部四入口、本机播放和 DLNA 投屏。手机与电视需连接同一局域网，电视需支持并开启 DLNA 视频接收；AirPlay 仍仅支持桌面版。桌面版数据库不会自动同步到安卓端，首次使用需重新导入点播源。
+调试签名 APK 输出到 `android/app/build/outputs/apk/debug/app-debug.apk`，可安装到 Android 手机、平板和电视。安卓端在原生 SQLite 中保存设置和播放记录，支持跟随设备旋转、手机端顶部分类与底部四入口、本机播放和 DLNA 投屏。手机与电视需连接同一局域网，电视需支持并开启 DLNA 视频接收；AirPlay 仍仅支持桌面版。桌面版数据库不会自动同步到安卓端，首次使用需重新导入点播源。
+
+同一 APK 也可安装在 Android TV / Google TV 上，电视桌面会显示「影窗」入口。电视端使用方向键移动焦点、确定键选择；播放时确定键暂停或继续，左右键各快退或快进 10 秒，返回键先退出全屏并回到选集。搜索框会在各端分别保存最近 10 条搜索，可点选重搜、逐条删除或清空；记录保存在各设备本地，不跨设备同步。电视端播放仍取决于设备 WebView、解码能力和所选线路，建议在目标电视上实测。
 
 安装包输出到 `release/`。字体文件随安装包提供，不需要启动时连接 Google Fonts。macOS 发布给其他电脑时，需要按 Apple 的要求签名和公证。首页数据和点播资源都依赖相应的第三方服务；个别线路失效时，可以在搜索结果中换源。接收设备需支持对应的投屏协议，且能访问电脑或手机的局域网地址。
 Windows 安装包使用安装向导，可在安装时选择目录。
