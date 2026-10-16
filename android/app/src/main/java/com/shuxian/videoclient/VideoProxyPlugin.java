@@ -14,6 +14,7 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.InetAddress;
+import java.net.DatagramSocket;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URL;
@@ -40,8 +41,8 @@ public class VideoProxyPlugin extends Plugin {
     @Override
     public void load() {
         try {
-            // 仅绑定平板本机回环地址，资源站无法访问这个代理。
-            server = new ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"));
+            // 随机令牌限制请求；投屏时电视需要通过局域网读取同一代理。
+            server = new ServerSocket(0, 50, InetAddress.getByName("0.0.0.0"));
             workers.execute(() -> {
                 while (!server.isClosed()) {
                     try {
@@ -70,7 +71,17 @@ public class VideoProxyPlugin extends Plugin {
                 throw new IOException("地址必须使用 HTTP 或 HTTPS");
             String kind = Boolean.TRUE.equals(call.getBoolean("image")) ? "image" : "stream";
             String encoded = URLEncoder.encode(target, StandardCharsets.UTF_8.name());
-            String address = "http://127.0.0.1:" + server.getLocalPort() + "/" + token + "/" + kind
+            String host = "127.0.0.1";
+            String deviceHost = call.getString("deviceHost");
+            if (deviceHost != null) {
+                // UDP connect 不发包，只选择通往电视的本机网卡地址。
+                try (DatagramSocket route = new DatagramSocket()) {
+                    route.connect(InetAddress.getByName(deviceHost), 1900);
+                    host = route.getLocalAddress().getHostAddress();
+                }
+                if (host.equals("0.0.0.0")) throw new IOException("无法确定局域网地址");
+            }
+            String address = "http://" + host + ":" + server.getLocalPort() + "/" + token + "/" + kind
                     + "?url=" + encoded + "&ads=" + (Boolean.TRUE.equals(call.getBoolean("filterAds")) ? "1" : "0");
             JSObject result = new JSObject();
             result.put("url", address);
@@ -93,10 +104,11 @@ public class VideoProxyPlugin extends Plugin {
                 if (line.regionMatches(true, 0, "Range:", 0, 6)) range = line.substring(6).trim();
             }
             OutputStream output = client.getOutputStream();
-            if (parts.length < 2 || !parts[0].equals("GET")) {
+            if (parts.length < 2 || (!parts[0].equals("GET") && !parts[0].equals("HEAD"))) {
                 writeError(output, 405, "Method Not Allowed");
                 return;
             }
+            boolean head = parts[0].equals("HEAD");
             URL local = new URL("http://127.0.0.1" + parts[1]);
             String path = local.getPath();
             boolean image = path.equals("/" + token + "/image");
@@ -137,16 +149,18 @@ public class VideoProxyPlugin extends Plugin {
                 try (InputStream input = upstream.getInputStream()) {
                     if (manifest) {
                         String body = new String(readAll(input), StandardCharsets.UTF_8);
-                        byte[] rewritten = rewriteManifest(body, upstream.getURL(), "1".equals(query.get("ads")))
+                        byte[] rewritten = rewriteManifest(body, upstream.getURL(), "1".equals(query.get("ads")), client.getLocalAddress().getHostAddress())
                                 .getBytes(StandardCharsets.UTF_8);
-                        writeHeaders(output, 200, "application/vnd.apple.mpegurl; charset=utf-8", rewritten.length, null, null);
-                        output.write(rewritten);
+                        writeHeaders(output, 200, "application/vnd.apple.mpegurl; charset=utf-8", rewritten.length, null, null, false);
+                        if (!head) output.write(rewritten);
                     } else {
                         writeHeaders(output, status, contentType, upstream.getContentLengthLong(),
-                                upstream.getHeaderField("Content-Range"), upstream.getHeaderField("Accept-Ranges"));
-                        byte[] buffer = new byte[65536];
-                        int count;
-                        while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
+                                upstream.getHeaderField("Content-Range"), upstream.getHeaderField("Accept-Ranges"), image);
+                        if (!head) {
+                            byte[] buffer = new byte[65536];
+                            int count;
+                            while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
+                        }
                     }
                     output.flush();
                 }
@@ -158,7 +172,7 @@ public class VideoProxyPlugin extends Plugin {
         }
     }
 
-    private String rewriteManifest(String body, URL base, boolean filterAds) throws IOException {
+    private String rewriteManifest(String body, URL base, boolean filterAds, String host) throws IOException {
         StringBuilder result = new StringBuilder();
         boolean adBreak = false;
         boolean skipSegment = false;
@@ -173,7 +187,7 @@ public class VideoProxyPlugin extends Plugin {
             if (!line.isEmpty() && !line.startsWith("#")) {
                 URL nested = new URL(base, line);
                 if (!skipSegment && !(filterAds && AD_HINT.matcher(nested.toString()).find())) {
-                    result.append(proxyAddress(nested.toString(), filterAds)).append('\n');
+                    result.append(proxyAddress(nested.toString(), filterAds, host)).append('\n');
                 } else if (previous.startsWith("#EXTINF")) {
                     int last = result.lastIndexOf(previous + "\n");
                     if (last >= 0) result.delete(last, result.length());
@@ -185,7 +199,7 @@ public class VideoProxyPlugin extends Plugin {
             Matcher matcher = NESTED_URI.matcher(line);
             StringBuffer replaced = new StringBuffer();
             while (matcher.find()) {
-                String uri = proxyAddress(new URL(base, matcher.group(1)).toString(), filterAds);
+                String uri = proxyAddress(new URL(base, matcher.group(1)).toString(), filterAds, host);
                 matcher.appendReplacement(replaced, Matcher.quoteReplacement("URI=\"" + uri + "\""));
             }
             matcher.appendTail(replaced);
@@ -195,8 +209,8 @@ public class VideoProxyPlugin extends Plugin {
         return result.toString();
     }
 
-    private String proxyAddress(String target, boolean filterAds) throws IOException {
-        return "http://127.0.0.1:" + server.getLocalPort() + "/" + token + "/stream?url="
+    private String proxyAddress(String target, boolean filterAds, String host) throws IOException {
+        return "http://" + host + ":" + server.getLocalPort() + "/" + token + "/stream?url="
                 + URLEncoder.encode(target, StandardCharsets.UTF_8.name()) + "&ads=" + (filterAds ? "1" : "0");
     }
 
@@ -208,10 +222,13 @@ public class VideoProxyPlugin extends Plugin {
         return result.toByteArray();
     }
 
-    private void writeHeaders(OutputStream output, int status, String type, long length, String contentRange, String acceptRanges) throws IOException {
-        StringBuilder headers = new StringBuilder("HTTP/1.1 " + status + " OK\r\n");
+    private void writeHeaders(OutputStream output, int status, String type, long length, String contentRange, String acceptRanges, boolean image) throws IOException {
+        StringBuilder headers = new StringBuilder("HTTP/1.1 " + status
+                + (status == 206 ? " Partial Content\r\n" : " OK\r\n"));
         headers.append("Content-Type: ").append(type).append("\r\n");
-        headers.append("Access-Control-Allow-Origin: *\r\nCache-Control: no-store\r\nConnection: close\r\n");
+        headers.append("Access-Control-Allow-Origin: *\r\nCache-Control: ")
+                .append(image ? "private, max-age=86400" : "no-store")
+                .append("\r\nConnection: close\r\n");
         if (length >= 0) headers.append("Content-Length: ").append(length).append("\r\n");
         if (contentRange != null) headers.append("Content-Range: ").append(contentRange).append("\r\n");
         if (acceptRanges != null) headers.append("Accept-Ranges: ").append(acceptRanges).append("\r\n");
@@ -221,7 +238,7 @@ public class VideoProxyPlugin extends Plugin {
 
     private void writeError(OutputStream output, int status, String message) throws IOException {
         byte[] body = message.getBytes(StandardCharsets.UTF_8);
-        writeHeaders(output, status, "text/plain; charset=utf-8", body.length, null, null);
+        writeHeaders(output, status, "text/plain; charset=utf-8", body.length, null, null, false);
         output.write(body);
     }
 

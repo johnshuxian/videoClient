@@ -1,7 +1,6 @@
 ext {
     minSdkVersion = 24
     compileSdkVersion = 36
-    // API 36 在大屏设备上可能忽略方向锁定；平板版暂按 API 35 构建。
     targetSdkVersion = 35
     androidxActivityVersion = '1.11.0'
     androidxAppCompatVersion = '1.7.1'

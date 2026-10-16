@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import Artplayer from "artplayer";
-import Hls from "hls.js";
+import type Artplayer from "artplayer";
+import type Hls from "hls.js";
 import { App as CapacitorApp } from "@capacitor/app";
 import {
   ArrowLeft,
@@ -108,9 +108,14 @@ function useProxyImage(original: string) {
     let active = true;
     setUrl("");
     if (original) {
-      window.videoAPI.imageUrl(original).then((proxied) => {
-        if (active) setUrl(proxied);
-      });
+      window.videoAPI
+        .imageUrl(original)
+        .then((proxied) => {
+          if (active) setUrl(proxied);
+        })
+        .catch(() => {
+          if (active) setUrl(original);
+        });
     }
     return () => {
       active = false;
@@ -129,7 +134,20 @@ function PosterImage({
   loading?: "lazy" | "eager";
 }) {
   const url = useProxyImage(src);
-  return url ? <img src={url} alt={alt} loading={loading} /> : null;
+  return url ? (
+    <img
+      src={url}
+      alt={alt}
+      loading={loading}
+      onError={(event) => {
+        // 部分图床拒绝代理的请求，回退到 WebView 直接读取。
+        if (url !== src) {
+          event.currentTarget.onerror = null;
+          event.currentTarget.src = src;
+        }
+      }}
+    />
+  ) : null;
 }
 
 function HeroPoster({
@@ -189,7 +207,13 @@ function Player({
     setError("");
     window.videoAPI
       .streamUrl(url, filterAds)
-      .then((stream) => {
+      .then(async (stream) => {
+        // 列表页无需加载播放器；进入播放页后再加载可缩短安卓首屏等待。
+        const [{ default: Artplayer }, hlsModule] = await Promise.all([
+          import("artplayer"),
+          stream.isHls ? import("hls.js") : Promise.resolve(null),
+        ]);
+        const Hls = hlsModule?.default;
         if (cancelled) return;
         art = new Artplayer({
           container,
@@ -198,8 +222,12 @@ function Player({
           ...(stream.isHls ? { type: "m3u8" as const } : {}),
           customType: {
             m3u8(video, source) {
-              if (Hls.isSupported()) {
-                hls = new Hls({ maxBufferLength: 40, enableWorker: true });
+              if (Hls?.isSupported()) {
+                hls = new Hls({
+                  maxBufferLength:
+                    window.videoAPI.platform === "android" ? 20 : 40,
+                  enableWorker: true,
+                });
                 hls.loadSource(source);
                 hls.attachMedia(video);
                 hls.on(Hls.Events.ERROR, (_, data) => {
@@ -353,6 +381,7 @@ export default function App() {
   const detailSerial = useRef(0);
   const progressSaved = useRef(0);
   const pageScroll = useRef<HTMLDivElement>(null);
+  const loadMoreTrigger = useRef<HTMLDivElement>(null);
   const customSourcePicker = useRef<HTMLDivElement>(null);
   const customCategoryCache = useRef(new Map<string, SourceCategory[]>());
   const loadedCustomCatalog = useRef("");
@@ -523,6 +552,67 @@ export default function App() {
       cancelled = true;
     };
   }, [section, customSource?.url, customCategoryId, customPage, customReload]);
+
+  useEffect(() => {
+    const loadCatalog =
+      section === "home" &&
+      !selected &&
+      !catalogLoading &&
+      !catalogError &&
+      catalogHasMore &&
+      catalog.length > 0;
+    const loadCustom =
+      section === "custom" &&
+      !selected &&
+      !customLoading &&
+      !customError &&
+      loadedCustomCatalog.current ===
+        JSON.stringify([
+          customSource?.url,
+          customCategoryId,
+          customPage,
+          customReload,
+        ]) &&
+      customItems.length > 0 &&
+      customPage < customPageCount;
+    const root = pageScroll.current;
+    const trigger = loadMoreTrigger.current;
+    if ((!loadCatalog && !loadCustom) || !root || !trigger) return;
+
+    // 下一页进入滚动区域附近时预加载；立即置为加载中，避免重复触发跳页。
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting) return;
+        observer.disconnect();
+        if (loadCatalog) {
+          setCatalogLoading(true);
+          setPage((current) => current + 1);
+        } else {
+          setCustomLoading(true);
+          setCustomPage((current) => current + 1);
+        }
+      },
+      { root, rootMargin: "0px 0px 240px 0px" },
+    );
+    observer.observe(trigger);
+    return () => observer.disconnect();
+  }, [
+    section,
+    selected,
+    page,
+    customPage,
+    catalogLoading,
+    catalogError,
+    catalogHasMore,
+    catalog.length,
+    customLoading,
+    customError,
+    customItems.length,
+    customPageCount,
+    customSource?.url,
+    customCategoryId,
+    customReload,
+  ]);
 
   useEffect(
     () =>
@@ -847,7 +937,8 @@ export default function App() {
     if (
       !selected ||
       episode === null ||
-      Date.now() - progressSaved.current < 4000
+      Date.now() - progressSaved.current <
+        (window.videoAPI.platform === "android" ? 15000 : 4000)
     )
       return;
     progressSaved.current = Date.now();
@@ -1001,14 +1092,14 @@ export default function App() {
           <button
             title="最小化"
             aria-label="最小化"
-            onClick={window.videoAPI.minimize}
+            onClick={() => window.videoAPI.minimize()}
           >
             <Minus size={18} />
           </button>
           <button
             title="最大化或还原"
             aria-label="最大化或还原"
-            onClick={window.videoAPI.maximize}
+            onClick={() => window.videoAPI.maximize()}
           >
             <Square size={14} />
           </button>
@@ -1016,7 +1107,7 @@ export default function App() {
             className="window-close"
             title="关闭"
             aria-label="关闭"
-            onClick={window.videoAPI.close}
+            onClick={() => window.videoAPI.close()}
           >
             <X size={18} />
           </button>
@@ -1024,7 +1115,8 @@ export default function App() {
       )}
       <aside className="sidebar">
         <button
-          className="brand"
+          className={`brand ${section === "home" ? "active" : ""}`}
+          aria-label="首页"
           onClick={() => {
             setSection("home");
             setSelected(null);
@@ -1033,57 +1125,70 @@ export default function App() {
           <span className="brand-mark">
             <Play size={17} fill="currentColor" />
           </span>
-          <span>
+          <span className="brand-title">
             影窗<strong>YINGCHUANG</strong>
           </span>
+          <span className="brand-mobile-label">首页</span>
         </button>
         <div className="nav-caption">发现</div>
         <button
-          className={`nav-item ${section === "home" && type === "movie" ? "active" : ""}`}
+          className={`nav-item mobile-category-nav ${section === "home" && type === "movie" ? "active" : ""}`}
           onClick={() => changeType("movie")}
         >
           <Film size={19} /> 电影
         </button>
         <button
-          className={`nav-item ${section === "home" && type === "tv" ? "active" : ""}`}
+          className={`nav-item mobile-category-nav ${section === "home" && type === "tv" ? "active" : ""}`}
           onClick={() => changeType("tv")}
         >
           <Tv size={19} /> 电视剧
         </button>
         <button
-          className={`nav-item ${section === "home" && type === "anime" ? "active" : ""}`}
+          className={`nav-item mobile-category-nav ${section === "home" && type === "anime" ? "active" : ""}`}
           onClick={() => changeType("anime")}
         >
           <Sparkles size={19} /> 番剧
         </button>
         <button
-          className={`nav-item ${section === "home" && type === "variety" ? "active" : ""}`}
+          className={`nav-item mobile-category-nav ${section === "home" && type === "variety" ? "active" : ""}`}
           onClick={() => changeType("variety")}
         >
           <Clapperboard size={19} /> 综艺
         </button>
         <button
           className={`nav-item ${section === "custom" ? "active" : ""}`}
+          aria-label="自定义点播源"
           onClick={() => {
             setSection("custom");
             setSelected(null);
           }}
         >
-          <ListFilter size={19} /> 自定义
+          <ListFilter size={19} />
+          <span className="nav-label-desktop">自定义</span>
+          <span className="nav-label-mobile">片源</span>
         </button>
         <div className="nav-caption library-caption">我的片单</div>
         <button
           className={`nav-item ${section === "history" ? "active" : ""}`}
+          aria-label="播放记录"
           onClick={() => {
             setSection("history");
             setSelected(null);
           }}
         >
-          <History size={19} /> 播放记录{" "}
+          <History size={19} />
+          <span className="nav-label-desktop">播放记录</span>
+          <span className="nav-label-mobile">历史</span>{" "}
           <span className="nav-count">{history.length}</span>
         </button>
-        <button className="nav-item" onClick={() => setSettingsOpen(true)}>
-          <Settings2 size={19} /> 播放设置
+        <button
+          className="nav-item"
+          aria-label="播放设置"
+          onClick={() => setSettingsOpen(true)}
+        >
+          <Settings2 size={19} />
+          <span className="nav-label-desktop">播放设置</span>
+          <span className="nav-label-mobile">设置</span>
         </button>
         <div className="sidebar-bottom">
           <div className="source-status">
@@ -1133,6 +1238,26 @@ export default function App() {
             </button>
           </div>
         </header>
+        {section === "home" && (
+          <nav className="mobile-channel-tabs" aria-label="内容分类">
+            {(
+              [
+                ["movie", "电影"],
+                ["tv", "电视剧"],
+                ["anime", "番剧"],
+                ["variety", "综艺"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                className={type === value ? "active" : ""}
+                onClick={() => changeType(value)}
+              >
+                {label}
+              </button>
+            ))}
+          </nav>
+        )}
 
         <div className="page-scroll" ref={pageScroll}>
           <main className="content">
@@ -1327,12 +1452,7 @@ export default function App() {
                     !catalogError &&
                     catalogHasMore &&
                     catalog.length > 0 && (
-                      <button
-                        className="load-more"
-                        onClick={() => setPage(page + 1)}
-                      >
-                        加载更多 <ChevronDown size={16} />
-                      </button>
+                      <div ref={loadMoreTrigger} className="load-more-trigger" />
                     )}
                 </section>
               </>
@@ -1563,12 +1683,7 @@ export default function App() {
                       !customError &&
                       customItems.length > 0 &&
                       customPage < customPageCount && (
-                        <button
-                          className="load-more"
-                          onClick={() => setCustomPage(customPage + 1)}
-                        >
-                          加载更多 <ChevronDown size={16} />
-                        </button>
+                        <div ref={loadMoreTrigger} className="load-more-trigger" />
                       )}
                   </>
                 )}
@@ -1903,11 +2018,9 @@ export default function App() {
                             </div>
                             {!casting && (
                               <div className="player-actions">
-                                {window.videoAPI.platform !== "android" && (
-                                  <button onClick={scanDevices}>
-                                    <MonitorPlay size={17} /> 投屏
-                                  </button>
-                                )}
+                                <button onClick={scanDevices}>
+                                  <MonitorPlay size={17} /> 投屏
+                                </button>
                                 {episode + 1 <
                                   detail.lines[line].episodes.length && (
                                   <button
@@ -2322,7 +2435,11 @@ export default function App() {
               </button>
             </div>
             <p>
-              确保电脑和电视在同一局域网。支持 DLNA 和 AirPlay 视频接收设备。
+              确保{window.videoAPI.platform === "android" ? "手机" : "电脑"}
+              和电视在同一局域网。
+              {window.videoAPI.platform === "android"
+                ? "支持 DLNA 视频接收设备。"
+                : "支持 DLNA 和 AirPlay 视频接收设备。"}
             </p>
             {castBusy && (
               <div className="loading">
@@ -2374,7 +2491,11 @@ export default function App() {
               <div className="empty small">
                 <Tv size={30} />
                 <h3>未发现设备</h3>
-                <p>检查电视的投屏功能和网络连接。</p>
+                <p>
+                  检查电视的投屏功能和网络连接。
+                  {window.videoAPI.platform === "darwin" &&
+                    "还需在 macOS「系统设置 → 隐私与安全性 → 本地网络」中允许影窗访问。"}
+                </p>
               </div>
             )}
             {devices.map((device) => (

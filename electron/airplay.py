@@ -52,7 +52,8 @@ async def handle(command):
     if action == "scan":
         # Electron 从 SQLite 读取配对信息，通过进程管道交给助手，不再写独立 JSON 文件。
         credentials = command.get("credentials", {})
-        found = await pyatv.scan(asyncio.get_running_loop(), timeout=3, protocol=Protocol.AirPlay)
+        # 局域网首次授权和部分电视的 Bonjour 响应需要比三秒更长的发现窗口。
+        found = await pyatv.scan(asyncio.get_running_loop(), timeout=5, protocol=Protocol.AirPlay)
         devices = {}
         result = []
         for device in found:
