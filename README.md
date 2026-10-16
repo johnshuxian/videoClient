@@ -45,7 +45,7 @@ npm run dist:android
 
 安装包输出到 `release/`。字体文件随安装包提供，不需要启动时连接 Google Fonts。macOS 发布给其他电脑时，需要按 Apple 的要求签名和公证。首页数据和点播资源都依赖相应的第三方服务；个别线路失效时，可以在搜索结果中换源。接收设备需支持对应的投屏协议，且能访问电脑或手机的局域网地址。
 Windows 安装包使用安装向导，可在安装时选择目录。
-推送到 `master`、提交 Pull Request 或在 GitHub Actions 中手动运行 `Build desktop installers`，会分别生成 Windows x64 安装包和 Apple Silicon（ARM64）macOS DMG，可在运行记录的 Artifacts 中下载。发布新版本时，先更新 `package.json` 的版本号，再推送对应的 `vX.Y.Z` 标签；两个安装包构建成功后会自动上传到 GitHub Releases。CI 产物未签名；向其他 Mac 分发前仍需配置 Apple 签名和公证。
+发布新版本时，先更新 `package.json` 的版本号，再推送对应的 `vX.Y.Z` 标签。GitHub Actions 会构建 Windows x64 安装包、Apple Silicon（ARM64）macOS DMG 和 Android 调试签名 APK，并发布到 GitHub Releases。文件名分别为 `videoClient-vX.Y.Z-windows-x64.exe`、`videoClient-vX.Y.Z-macos-arm64.dmg` 和 `videoClient-vX.Y.Z-android.apk`，也可在运行记录的 Artifacts 中下载。CI 产物未签名；向其他 Mac 分发前仍需配置 Apple 签名和公证。
 
 ### macOS 未签名版本首次打开
 

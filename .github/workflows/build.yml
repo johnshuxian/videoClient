@@ -19,12 +19,12 @@ jobs:
             platform: win
             arch: x64
             artifact: windows-x64
-            installer: release/*.exe
+            extension: exe
           - os: macos-15
             platform: mac
             arch: arm64
             artifact: macos-arm64
-            installer: release/*.dmg
+            extension: dmg
 
     steps:
       - uses: actions/checkout@v7
@@ -50,8 +50,8 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.artifact }}
-          path: ${{ matrix.installer }}
+          name: videoClient-${{ github.ref_name }}-${{ matrix.artifact }}
+          path: release/videoClient-${{ github.ref_name }}-${{ matrix.artifact }}.${{ matrix.extension }}
           if-no-files-found: error
           retention-days: 14
 
@@ -81,11 +81,11 @@ jobs:
       - name: Prepare APK artifact
         run: |
           mkdir -p release
-          cp android/app/build/outputs/apk/debug/app-debug.apk release/影窗-android.apk
+          cp android/app/build/outputs/apk/debug/app-debug.apk "release/videoClient-${GITHUB_REF_NAME}-android.apk"
       - uses: actions/upload-artifact@v7
         with:
-          name: android-apk
-          path: release/影窗-android.apk
+          name: videoClient-${{ github.ref_name }}-android
+          path: release/videoClient-${{ github.ref_name }}-android.apk
           if-no-files-found: error
           retention-days: 14
 
@@ -102,7 +102,12 @@ jobs:
           path: release
           merge-multiple: true
       - name: Publish installers
-        run: gh release create "$GITHUB_REF_NAME" release/*.exe release/*.dmg release/*.apk --verify-tag --generate-notes
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "release/videoClient-${GITHUB_REF_NAME}-windows-x64.exe" \
+            "release/videoClient-${GITHUB_REF_NAME}-macos-arm64.dmg" \
+            "release/videoClient-${GITHUB_REF_NAME}-android.apk" \
+            --verify-tag --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
