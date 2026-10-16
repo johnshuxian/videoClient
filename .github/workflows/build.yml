@@ -2,10 +2,7 @@ name: Build desktop installers and Android APK
 
 on:
   push:
-    branches: [master]
     tags: ['v*']
-  pull_request:
-  workflow_dispatch:
 
 permissions:
   contents: read
