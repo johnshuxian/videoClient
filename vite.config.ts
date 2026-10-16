@@ -5,5 +5,7 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   base: "./",
   plugins: [react()],
+  // 部分电视的系统 WebView 更新较慢，避免产物包含较新的 JavaScript 语法。
+  build: { target: "es2018" },
   server: { host: "127.0.0.1", strictPort: true },
 });

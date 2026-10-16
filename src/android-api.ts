@@ -153,9 +153,12 @@ function searchItem(vod: VodEntry, source: Source): SearchItem {
 }
 
 export async function createAndroidVideoAPI(): Promise<Window["videoAPI"]> {
+  const root = document.getElementById("root")!;
   // React 挂载前标记电视设备，首屏直接使用大屏布局和遥控器导航。
+  root.dataset.startupStep = "识别设备";
   const { isTv } = await statusBar.deviceInfo();
   if (isTv) document.body.classList.add("tv-body");
+  root.dataset.startupStep = "连接本机数据库";
   const sqlite = new SQLiteConnection(CapacitorSQLite);
   const db = (await sqlite.isConnection("settings", false)).result
     ? await sqlite.retrieveConnection("settings", false)
@@ -166,7 +169,9 @@ export async function createAndroidVideoAPI(): Promise<Window["videoAPI"]> {
         1,
         false,
       );
+  root.dataset.startupStep = "打开本机数据库";
   if (!(await db.isDBOpen()).result) await db.open();
+  root.dataset.startupStep = "读取本机设置";
   await db.execute(
     "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
   );
@@ -178,6 +183,7 @@ export async function createAndroidVideoAPI(): Promise<Window["videoAPI"]> {
   const initialTheme =
     settings.get("color-theme") === "light" ? "light" : "dark";
   document.documentElement.dataset.theme = initialTheme;
+  root.dataset.startupStep = "设置界面主题";
   await statusBar.setTheme({ theme: initialTheme });
   let writes = Promise.resolve();
   let activeSearch = 0;

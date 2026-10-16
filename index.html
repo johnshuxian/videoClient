@@ -37,6 +37,27 @@
         <span>影窗正在启动...</span>
       </div>
     </div>
+    <script>
+      // 独立于模块脚本运行，电视 WebView 不支持模块或初始化卡住时也能给出提示。
+      (function () {
+        var root = document.getElementById("root");
+        if (!("noModule" in document.createElement("script"))) {
+          root.textContent = "影窗无法启动：电视的系统 WebView 版本过旧，请更新电视系统或 Android System WebView。";
+          return;
+        }
+        window.addEventListener("error", function (event) {
+          if (event.target === window && root.querySelector(".startup-screen")) {
+            root.textContent = "影窗启动失败：" + event.message;
+          }
+        });
+        window.setTimeout(function () {
+          if (root.querySelector(".startup-screen")) {
+            root.textContent = "影窗启动超时（" + (root.dataset.startupStep || "加载页面脚本") +
+              "）。请重启应用；如果仍然出现，请更新电视系统或 Android System WebView，并反馈括号中的阶段。";
+          }
+        }, 20000);
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

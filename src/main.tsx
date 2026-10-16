@@ -8,9 +8,11 @@ import "./style.css";
 async function start() {
   if (Capacitor.getPlatform() === "android") {
     document.body.classList.add("android-body");
+    document.getElementById("root")!.dataset.startupStep = "初始化安卓数据";
     const { createAndroidVideoAPI } = await import("./android-api");
     window.videoAPI = await createAndroidVideoAPI();
   }
+  document.getElementById("root")!.dataset.startupStep = "加载首页";
   createRoot(document.getElementById("root")!).render(
     <React.StrictMode>
       <App />
@@ -19,5 +21,5 @@ async function start() {
 }
 
 start().catch((error) => {
-  document.getElementById("root")!.textContent = `影窗启动失败：${error.message}`;
+  document.getElementById("root")!.textContent = `影窗启动失败：${String(error)}`;
 });
