@@ -336,24 +336,23 @@ export async function createAndroidVideoAPI(): Promise<Window["videoAPI"]> {
       if (!Array.isArray(entries))
         throw new Error("订阅文件需要包含 sources 数组");
       const seen = new Set<string>();
-      const sources = entries.flatMap((item) => {
+      const sources: Source[] = [];
+      for (const item of entries) {
         if (typeof item?.name !== "string" || typeof item?.url !== "string")
-          return [];
+          continue;
         try {
           const url = sourceAddress(item.url);
-          if (seen.has(url.href)) return [];
+          if (seen.has(url.href)) continue;
           seen.add(url.href);
-          return [
-            {
-              name: item.name.trim() || url.host,
-              url: item.url,
-              isAdult: !!item.isAdult,
-            },
-          ];
+          sources.push({
+            name: item.name.trim() || url.host,
+            url: item.url,
+            isAdult: !!item.isAdult,
+          });
         } catch {
-          return [];
+          // 跳过订阅中的无效地址，继续导入其他有效源。
         }
-      });
+      }
       if (!sources.length) throw new Error("订阅文件中没有有效的点播源");
       return sources;
     },
@@ -455,31 +454,31 @@ export async function createAndroidVideoAPI(): Promise<Window["videoAPI"]> {
       const vod = data.list?.[0];
       if (!vod) throw new Error("该资源没有详情");
       const names = String(vod.vod_play_from || "").split("$$$");
-      const lines = String(vod.vod_play_url || "")
-        .split("$$$")
-        .flatMap((group, index) => {
-          const episodes = group
-            .split("#")
-            .map((entry, episodeIndex) => {
-              const separator = entry.indexOf("$");
-              const label =
-                separator < 0
-                  ? `第 ${episodeIndex + 1} 集`
-                  : entry.slice(0, separator);
-              const episodeUrl =
-                separator < 0 ? entry : entry.slice(separator + 1);
-              return /^https?:\/\//i.test(episodeUrl)
-                ? {
-                    label: label || `第 ${episodeIndex + 1} 集`,
-                    url: episodeUrl,
-                  }
-                : null;
-            })
-            .filter((episode) => episode !== null);
-          return episodes.length
-            ? [{ name: names[index] || `线路 ${index + 1}`, episodes }]
-            : [];
-        });
+      const lines: VodDetail["lines"] = [];
+      const groups = String(vod.vod_play_url || "").split("$$$");
+      for (let index = 0; index < groups.length; index++) {
+        const group = groups[index];
+        const episodes = group
+          .split("#")
+          .map((entry, episodeIndex) => {
+            const separator = entry.indexOf("$");
+            const label =
+              separator < 0
+                ? `第 ${episodeIndex + 1} 集`
+                : entry.slice(0, separator);
+            const episodeUrl =
+              separator < 0 ? entry : entry.slice(separator + 1);
+            return /^https?:\/\//i.test(episodeUrl)
+              ? {
+                  label: label || `第 ${episodeIndex + 1} 集`,
+                  url: episodeUrl,
+                }
+              : null;
+          })
+          .filter((episode) => episode !== null);
+        if (episodes.length)
+          lines.push({ name: names[index] || `线路 ${index + 1}`, episodes });
+      }
       return {
         title: vod.vod_name || "",
         poster: posterAddress(vod.vod_pic, address),
