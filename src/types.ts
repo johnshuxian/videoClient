@@ -116,6 +116,7 @@ declare global {
         callback: (event: { deviceId: string; error: string }) => void,
       ) => () => void;
       setTheme: (theme: "light" | "dark") => void;
+      setVideoFullscreen: (fullscreen: boolean) => void;
       minimize: () => void;
       maximize: () => void;
       close: () => void;

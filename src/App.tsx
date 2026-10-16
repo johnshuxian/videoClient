@@ -188,12 +188,14 @@ function Player({
   resume,
   onProgress,
   onEnded,
+  playerInstance,
 }: {
   url: string;
   filterAds: boolean;
   resume: number;
   onProgress: (position: number, duration: number) => void;
   onEnded: () => void;
+  playerInstance: React.RefObject<Artplayer | null>;
 }) {
   const playerRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState("");
@@ -248,9 +250,24 @@ function Player({
           setting: true,
           playbackRate: true,
           pip: true,
-          fullscreen: true,
+          // Android WebView 使用网页全屏，避免系统全屏视图接管触摸和返回键。
+          fullscreen: window.videoAPI.platform !== "android",
           fullscreenWeb: true,
         });
+        playerInstance.current = art;
+        if (window.videoAPI.platform === "android") {
+          const exitButton = document.createElement("button");
+          exitButton.className = "mobile-player-exit-fullscreen";
+          exitButton.type = "button";
+          exitButton.textContent = "退出全屏";
+          exitButton.onclick = () => {
+            if (art) art.fullscreenWeb = false;
+          };
+          art.template.$player.appendChild(exitButton);
+          art.on("fullscreenWeb", (fullscreen) => {
+            window.videoAPI.setVideoFullscreen(fullscreen);
+          });
+        }
         art.on("video:loadedmetadata", () => {
           if (art && resume > 5 && resume < art.duration - 15)
             art.currentTime = resume;
@@ -278,6 +295,9 @@ function Player({
     return () => {
       cancelled = true;
       hls?.destroy();
+      // 播放器在网页全屏时会被移到 body，销毁前须先放回容器。
+      if (art?.fullscreenWeb) art.fullscreenWeb = false;
+      if (playerInstance.current === art) playerInstance.current = null;
       art?.destroy(false);
     };
   }, [url, filterAds]);
@@ -384,6 +404,7 @@ export default function App() {
   const detailSerial = useRef(0);
   const progressSaved = useRef(0);
   const pageScroll = useRef<HTMLDivElement>(null);
+  const playerInstance = useRef<Artplayer | null>(null);
   const loadMoreTrigger = useRef<HTMLDivElement>(null);
   const customSourcePicker = useRef<HTMLDivElement>(null);
   const customCategoryCache = useRef(new Map<string, SourceCategory[]>());
@@ -401,7 +422,9 @@ export default function App() {
     let active = true;
     let remove: (() => void) | undefined;
     CapacitorApp.addListener("backButton", () => {
-      if (sourceFormatOpen) setSourceFormatOpen(false);
+      if (playerInstance.current?.fullscreenWeb)
+        playerInstance.current.fullscreenWeb = false;
+      else if (sourceFormatOpen) setSourceFormatOpen(false);
       else if (settingsOpen) setSettingsOpen(false);
       else if (customSourceOpen) setCustomSourceOpen(false);
       else if (selected) {
@@ -2010,6 +2033,7 @@ export default function App() {
                               }
                               onProgress={recordProgress}
                               onEnded={nextEpisode}
+                              playerInstance={playerInstance}
                             />
                           )}
                           <div className="player-title">

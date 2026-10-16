@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld("videoAPI", {
     return () => ipcRenderer.removeListener("cast:ended", listener);
   },
   setTheme: (theme) => ipcRenderer.send("theme:set", theme),
+  setVideoFullscreen: () => {},
   minimize: () => ipcRenderer.send("window:minimize"),
   maximize: () => ipcRenderer.send("window:maximize"),
   close: () => ipcRenderer.send("window:close"),

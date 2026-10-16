@@ -40,6 +40,7 @@ type Dlna = {
 };
 type AppStatusBar = {
   setTheme(options: { theme: "light" | "dark" }): Promise<void>;
+  setFullscreen(options: { fullscreen: boolean }): Promise<void>;
 };
 
 const proxy = registerPlugin<VideoProxy>("VideoProxy");
@@ -532,6 +533,11 @@ export async function createAndroidVideoAPI(): Promise<Window["videoAPI"]> {
     setTheme: (theme) => {
       void statusBar.setTheme({ theme }).catch((error) =>
         console.error("状态栏颜色更新失败", error),
+      );
+    },
+    setVideoFullscreen: (fullscreen) => {
+      void statusBar.setFullscreen({ fullscreen }).catch((error) =>
+        console.error("播放时状态栏更新失败", error),
       );
     },
     minimize: () => undefined,
