@@ -341,7 +341,10 @@ export default function App() {
     return Number.isInteger(saved) && saved >= 1 && saved <= 100 ? saved : 8;
   });
   const [theme, setTheme] = useState<"dark" | "light">(
-    readStorage("color-theme", "light"),
+    readStorage(
+      "color-theme",
+      window.videoAPI.platform === "android" ? "dark" : "light",
+    ),
   );
   const [filterAds, setFilterAds] = useState(readStorage("filter-ads", true));
   const [autoplay, setAutoplay] = useState(readStorage("autoplay", true));

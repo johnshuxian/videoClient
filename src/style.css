@@ -2362,12 +2362,18 @@ a {
 /* 安卓横屏和窄平板沿用侧栏，竖屏手机改为底部导航。 */
 body.android-body {
   min-width: 0;
-  background: #edf3f7;
+  background: #0b101a;
   /* 中文优先用设备字库，避免首屏解析随桌面包携带的大字体文件。 */
   font-family: "DM Sans", "HarmonyOS Sans SC", MiSans, "Noto Sans CJK SC", system-ui, sans-serif;
 }
-html[data-theme="dark"] body.android-body {
-  background: #0b101a;
+body.android-body .startup-screen {
+  color: #eaf2fa;
+}
+html[data-theme="light"] body.android-body {
+  background: #edf3f7;
+}
+html[data-theme="light"] body.android-body .startup-screen {
+  color: #172b3c;
 }
 .platform-android {
   font-weight: 400;

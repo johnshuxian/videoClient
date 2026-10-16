@@ -15,12 +15,12 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 @CapacitorPlugin(name = "AppStatusBar")
 public class StatusBarPlugin extends Plugin {
     // 只调整当前应用窗口的状态栏，不修改手机的系统主题。
-    private boolean light = true;
+    private boolean light = false;
 
     @Override
     public void load() {
         super.load();
-        light = !getActivity().getPreferences(Context.MODE_PRIVATE).getBoolean("dark", false);
+        light = !getActivity().getPreferences(Context.MODE_PRIVATE).getBoolean("dark", true);
     }
 
     @PluginMethod
