@@ -4,9 +4,17 @@ import { Capacitor } from "@capacitor/core";
 import App from "./App";
 import "./style.css";
 
-// Android 先从 SQLite 加载设置，再挂载页面，保证首屏选中的点播源正确。
+// 移动端先加载本机设置，再挂载页面，保证首屏选中的点播源正确。
 async function start() {
-  if (Capacitor.getPlatform() === "android") {
+  if (document.documentElement.dataset.harmony === "true") {
+    document.body.classList.add("android-body");
+    // Artplayer 只通过 Android/iOS 等 UA 标记启用手机触控控件；ArkWeb 默认 UA 不包含这些标记。
+    (globalThis as typeof globalThis & { CUSTOM_USER_AGENT?: string }).CUSTOM_USER_AGENT =
+      `${navigator.userAgent} Android`;
+    document.getElementById("root")!.dataset.startupStep = "初始化鸿蒙数据";
+    const { createHarmonyVideoAPI } = await import("./harmony-api");
+    window.videoAPI = await createHarmonyVideoAPI();
+  } else if (Capacitor.getPlatform() === "android") {
     document.body.classList.add("android-body");
     document.getElementById("root")!.dataset.startupStep = "初始化安卓数据";
     const { createAndroidVideoAPI } = await import("./android-api");
@@ -21,5 +29,6 @@ async function start() {
 }
 
 start().catch((error) => {
-  document.getElementById("root")!.textContent = `影窗启动失败：${String(error)}`;
+  document.getElementById("root")!.textContent =
+    `影窗启动失败：${String(error)}`;
 });

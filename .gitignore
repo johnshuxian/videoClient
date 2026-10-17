@@ -10,5 +10,15 @@ __pycache__/
 *.tsbuildinfo
 *.jks
 *.keystore
+*.p12
+*.p7b
+*.cer
 .DS_Store
 .playwright-cli/
+harmony/entry/src/main/resources/rawfile/www/
+harmony/.hvigor/
+harmony/build-profile.json5
+harmony/entry/build/
+harmony/build/
+harmony/oh_modules/
+harmony/.idea/

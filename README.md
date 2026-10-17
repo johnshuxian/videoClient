@@ -45,11 +45,39 @@ npm run dist:android
 
 同一 APK 也可安装在 Android TV / Google TV 上，电视桌面会显示「影窗」入口。电视端使用方向键移动焦点、确定键选择；播放时确定键暂停或继续，左右键各快退或快进 10 秒，返回键先退出全屏并回到选集。搜索框会在各端分别保存最近 10 条搜索，可点选重搜、逐条删除或清空；记录保存在各设备本地，不跨设备同步。电视端播放仍取决于设备 WebView、解码能力和所选线路，建议在目标电视上实测。
 
+### HarmonyOS 7 适配工程
+
+`harmony/` 是面向 HarmonyOS 7（API 26.0.0）的原生 HAP 工程。安装 DevEco Studio 26.0.0 Release 和对应 SDK 后，先在仓库根目录运行：
+
+```bash
+npm run sync:harmony
+```
+
+然后在 DevEco Studio 中打开 `harmony/`，同步工程。在 **File → Project Structure → Project → Signing Configs** 为连接的真机配置自动调试签名，再构建并运行 `entry`。每次修改 React 页面或更新版本号后，重新运行同步命令。网页资源随 HAP 打包，无需运行外部服务器。本地生成的 `harmony/build-profile.json5` 包含签名密码，已被 Git 忽略；不要强制添加到仓库。
+
+鸿蒙工程已接入首页、点播源请求、搜索、本地设置、图片和视频的本机代理，以及 DLNA 搜索、投屏与进度查询。进入播放页后在详情页内自动播放，手动点击全屏时横屏并隐藏系统栏，退出全屏后恢复原方向；浅色和深色模式同步设置状态栏、导航栏颜色。鸿蒙端设置使用 ArkWeb 本地存储，与安卓 SQLite 数据互不迁移。HLS 广告过滤暂未移植。
+
+API 26 工程已通过 DevEco Studio 26.0.0 编译与调试签名；真机已验证海报和视频经代理加载。DLNA 仍需在同一局域网的电视上做投屏验收。
+
 安装包输出到 `release/`。字体文件随安装包提供，不需要启动时连接 Google Fonts。macOS 发布给其他电脑时，需要按 Apple 的要求签名和公证。首页数据和点播资源都依赖相应的第三方服务；个别线路失效时，可以在搜索结果中换源。接收设备需支持对应的投屏协议，且能访问电脑或手机的局域网地址。
 Windows 安装包使用安装向导，可在安装时选择目录。
-发布新版本时，先更新 `package.json` 的版本号，再推送对应的 `vX.Y.Z` 标签。GitHub Actions 会构建 Windows x64 安装包、Apple Silicon（ARM64）macOS DMG 和 Android 正式签名 APK，并发布到 GitHub Releases。文件名分别为 `videoClient-vX.Y.Z-windows-x64.exe`、`videoClient-vX.Y.Z-macos-arm64.dmg` 和 `videoClient-vX.Y.Z-android.apk`，也可在运行记录的 Artifacts 中下载。桌面端 CI 产物未签名；向其他 Mac 分发前仍需配置 Apple 签名和公证。
+发布新版本时，先更新 `package.json` 的版本号，再推送对应的 `vX.Y.Z` 标签。GitHub Actions 会构建 Windows x64 安装包、Apple Silicon（ARM64）macOS DMG、Android 正式签名 APK 和 HarmonyOS 签名 HAP，并发布到 GitHub Releases。文件名分别为 `videoClient-vX.Y.Z-windows-x64.exe`、`videoClient-vX.Y.Z-macos-arm64.dmg`、`videoClient-vX.Y.Z-android.apk` 和 `videoClient-vX.Y.Z-harmony.hap`，也可在运行记录的 Artifacts 中下载。桌面端 CI 产物未签名；向其他 Mac 分发前仍需配置 Apple 签名和公证。
 
 GitHub 仓库的 Actions Secrets 需要配置 `ANDROID_KEYSTORE_BASE64`（同一份 JKS 密钥库的 Base64 内容）和 `ANDROID_KEYSTORE_PASSWORD`。工作流只在构建签名版 APK 时读取它们，并核对证书 SHA-256 指纹 `7F:98:3E:F3:2A:1B:69:A8:4E:D1:94:79:78:13:E1:88:C4:66:DD:BC:CE:E1:A7:43:89:0C:6F:36:B5:58:FE:D1`；密钥缺失或签名不一致时直接失败，避免再次发布不同签名的 APK。请在仓库外备份原始 JKS 和密码，后续版本必须继续使用同一密钥。本地 `npm run dist:android` 仍生成调试签名 APK；旧版 GitHub 调试签名 APK 无法用新正式签名直接覆盖安装，需要先卸载一次。
+
+### GitHub 上的鸿蒙构建设置
+
+鸿蒙任务使用带 `harmony` 标签的 Windows x64 自托管 Runner。到仓库 **Settings → Actions → Runners → New self-hosted runner**，按 GitHub 给出的 Windows 命令安装并启动 Runner，添加 `harmony` 标签。Runner 需要 PowerShell 7、DevEco Studio 26 和 HarmonyOS API 26 SDK；工作流默认从 `E:\mysoft\DevEco Studio` 调用工具。若 Runner 装在其他机器，请先修改工作流中的 `DEVECO_HOME`。Runner 必须保持在线，鸿蒙任务才能开始。
+
+在这台电脑的 PowerShell 7 中运行以下命令。脚本会把当前 `.p12`、配套的 `.cer` 和 `.p7b`、DevEco 密码加密所需的 `material` 目录，以及本机未纳入版本控制的签名配置打包，并将 Base64 内容复制到剪贴板：
+
+```powershell
+.\scripts\export-harmony-signing.ps1 -StoreFile 'C:\Users\zhang\.ohos\config\default_harmony_VAi7LMTYvejwjYVB_cXQhifgVj8aRd39jNb_tzpaozg=.p12'
+```
+
+到仓库 **Settings → Secrets and variables → Actions → New repository secret**，添加 `HARMONY_SIGNING_BUNDLE_BASE64`，粘贴剪贴板内容。请勿将签名包、Base64 或本机 `harmony/build-profile.json5` 提交到仓库。以后换构建机时，仍需使用同一套签名材料；可在新机器重新导出，并更新这一项 Secret。
+
+CI 会校验 `.cer` 的 SHA-256 为 `50599d171bf509a40dfa214b5bcd366b2b6ff9c762aa67781a600b8b79c4c5c6`，不一致就停止构建，避免发布无法覆盖当前安装版的 HAP。当前使用的自动调试签名配置通常只允许已登记的设备安装；若要面向所有设备分发，需先在华为开发者平台申请正式发布签名，这会涉及签名迁移。本工作流也支持在 Actions 页面手动运行，手动运行只上传构建产物，不创建 GitHub Release。
 
 ### macOS 未签名版本首次打开
 

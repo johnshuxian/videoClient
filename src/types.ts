@@ -118,7 +118,11 @@ declare global {
         callback: (event: { deviceId: string; error: string }) => void,
       ) => () => void;
       setTheme: (theme: "light" | "dark") => void;
+      setSystemBarSurface?: (surface: "page" | "detail" | "settings") => void;
       setVideoFullscreen: (fullscreen: boolean) => void;
+      getVideoBrightness?: () => Promise<number>;
+      setVideoBrightness?: (brightness: number) => void;
+      resetVideoBrightness?: () => void;
       minimize: () => void;
       maximize: () => void;
       close: () => void;

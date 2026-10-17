@@ -185,47 +185,347 @@ function HeroPoster({
   );
 }
 
+function enableMobilePlaybackGestures(art: Artplayer) {
+  const player = art.template.$player;
+  const hint = document.createElement("div");
+  hint.className = "mobile-seek-hint";
+  player.append(hint);
+  let pointerId: number | null = null;
+  let pressX = 0;
+  let pressY = 0;
+  let direction: -1 | 1 = 1;
+  let holdTimer: number | undefined;
+  let previewTimer: number | undefined;
+  let clickTimer: number | undefined;
+  let seekStartedAt = 0;
+  let seekStartPosition = 0;
+  let previewPosition = 0;
+  let originalPlaybackRate = 1;
+  let wasPaused = false;
+  let holdActive = false;
+  let adjustMode: "brightness" | "volume" | null = null;
+  let adjustStart = 0;
+  let adjustValue = 0;
+  let brightness = 0.5;
+  let lastBrightnessSent = 0;
+  let suppressClick = false;
+
+  const readBrightness = () => {
+    void window.videoAPI.getVideoBrightness?.().then((value) => {
+      if (!adjustMode) brightness = value;
+    }).catch(() => {});
+  };
+  const onFullscreenWeb = (fullscreen: boolean) => {
+    if (fullscreen) readBrightness();
+    else {
+      adjustMode = null;
+      stopGesture(false);
+      window.videoAPI.resetVideoBrightness?.();
+    }
+  };
+  art.on("fullscreenWeb", onFullscreenWeb);
+
+  const updateRewindPreview = () => {
+    // 只更新回退目标，松手时才 seek 一次，避免 HLS 反复拉流和解码。
+    const elapsed = (performance.now() - seekStartedAt) / 1000;
+    previewPosition = Math.max(0, seekStartPosition - elapsed * 2);
+    const minutes = Math.floor(previewPosition / 60);
+    const seconds = String(Math.floor(previewPosition % 60)).padStart(2, "0");
+    hint.textContent = `快退 2× · 松手跳转 ${minutes}:${seconds}`;
+  };
+  const stopGesture = (restorePlayback = true) => {
+    window.clearTimeout(holdTimer);
+    window.clearInterval(previewTimer);
+    if (adjustMode === "brightness")
+      window.videoAPI.setVideoBrightness?.(adjustValue);
+    else if (adjustMode === "volume") art.volume = adjustValue;
+    if (holdActive) {
+      if (direction > 0) {
+        art.video.playbackRate = originalPlaybackRate;
+        if (wasPaused) art.video.pause();
+      } else if (restorePlayback) {
+        updateRewindPreview();
+        art.video.currentTime = previewPosition;
+        if (!wasPaused) void art.video.play().catch(() => {});
+      }
+    }
+    hint.classList.remove("active", "adjust");
+    holdTimer = undefined;
+    previewTimer = undefined;
+    holdActive = false;
+    adjustMode = null;
+    pointerId = null;
+  };
+  const onPointerDown = (event: PointerEvent) => {
+    if (event.pointerType !== "touch" || !event.isPrimary || pointerId !== null)
+      return;
+    const target = event.target;
+    if (
+      !(target instanceof Node) ||
+      [
+        art.template.$bottom,
+        art.template.$setting,
+        art.template.$contextmenu,
+        art.template.$infoPanel,
+      ].some((control) => control.contains(target))
+    )
+      return;
+    const duration = art.video.duration;
+    const canSeek = Number.isFinite(duration) && duration > 0.1;
+    if (!canSeek && !art.fullscreenWeb && !art.fullscreen) return;
+    const rect = player.getBoundingClientRect();
+    const fraction = (event.clientX - rect.left) / rect.width;
+    // 中间保留给播放器原有的播放、暂停点击区域。
+    if (fraction >= 0.4 && fraction <= 0.6) return;
+    pointerId = event.pointerId;
+    pressX = event.clientX;
+    pressY = event.clientY;
+    direction = fraction < 0.4 ? -1 : 1;
+    if (canSeek) holdTimer = window.setTimeout(() => {
+      if (pointerId !== event.pointerId) return;
+      holdActive = true;
+      wasPaused = art.video.paused;
+      originalPlaybackRate = art.video.playbackRate;
+      seekStartPosition = art.video.currentTime;
+      seekStartedAt = performance.now();
+      if (direction > 0) {
+        // 正向直接倍速播放，视频和声音保持连续。
+        art.video.playbackRate = 2;
+        hint.textContent = "快进 2×";
+        if (wasPaused)
+          void art.video
+            .play()
+            .then(() => {
+              if (!holdActive) art.video.pause();
+            })
+            .catch(() => {});
+      } else {
+        art.video.pause();
+        updateRewindPreview();
+        previewTimer = window.setInterval(updateRewindPreview, 100);
+      }
+      hint.classList.toggle("rewind", direction < 0);
+      hint.classList.add("active");
+    }, 400);
+  };
+  const onPointerMove = (event: PointerEvent) => {
+    if (event.pointerId !== pointerId || holdActive) return;
+    const deltaX = event.clientX - pressX;
+    const deltaY = event.clientY - pressY;
+    if (
+      !adjustMode &&
+      (art.fullscreenWeb || art.fullscreen) &&
+      Math.abs(deltaY) > 18 &&
+      Math.abs(deltaY) > Math.abs(deltaX) * 1.2
+    ) {
+      window.clearTimeout(holdTimer);
+      adjustMode = direction < 0 ? "brightness" : "volume";
+      adjustStart = adjustMode === "brightness" ? brightness : art.volume;
+      hint.classList.remove("rewind");
+      hint.classList.add("adjust", "active");
+    }
+    if (adjustMode) {
+      const height = player.getBoundingClientRect().height;
+      adjustValue = Math.max(
+        adjustMode === "brightness" ? 0.05 : 0,
+        Math.min(1, adjustStart - (deltaY / height) * 1.5),
+      );
+      if (adjustMode === "brightness") {
+        brightness = adjustValue;
+        if (performance.now() - lastBrightnessSent > 80) {
+          window.videoAPI.setVideoBrightness?.(adjustValue);
+          lastBrightnessSent = performance.now();
+        }
+      } else {
+        art.muted = false;
+        art.video.volume = adjustValue;
+      }
+      hint.textContent = `${adjustMode === "brightness" ? "亮度" : "音量"} ${Math.round(adjustValue * 100)}%`;
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    if (Math.hypot(deltaX, deltaY) > 24)
+      stopGesture(false);
+  };
+  const onPointerEnd = (event: PointerEvent) => {
+    if (event.pointerId !== pointerId) return;
+    if (holdActive || adjustMode) {
+      // 长按结束后的合成点击不能再触发 Artplayer 的播放/暂停。
+      event.preventDefault();
+      event.stopPropagation();
+      suppressClick = true;
+      window.clearTimeout(clickTimer);
+      clickTimer = window.setTimeout(() => (suppressClick = false), 500);
+    }
+    stopGesture();
+  };
+  const onTouchEnd = (event: TouchEvent) => {
+    if (
+      (!holdActive && !adjustMode && !suppressClick) ||
+      !player.contains(event.target as Node)
+    )
+      return;
+    event.preventDefault();
+    event.stopPropagation();
+  };
+  const onClick = (event: MouseEvent) => {
+    if (!suppressClick || !player.contains(event.target as Node)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    suppressClick = false;
+  };
+  const onContextMenu = (event: MouseEvent) => {
+    if (pointerId === null) return;
+    event.preventDefault();
+    event.stopPropagation();
+  };
+  const onVisibilityChange = () => {
+    if (document.hidden) stopGesture(false);
+  };
+  const listeners = new AbortController();
+  const capture = { capture: true, signal: listeners.signal };
+  player.addEventListener("pointerdown", onPointerDown, capture);
+  player.addEventListener("contextmenu", onContextMenu, capture);
+  document.addEventListener("pointermove", onPointerMove, capture);
+  document.addEventListener("pointerup", onPointerEnd, capture);
+  document.addEventListener("pointercancel", onPointerEnd, capture);
+  document.addEventListener("touchend", onTouchEnd, capture);
+  document.addEventListener("click", onClick, capture);
+  document.addEventListener("visibilitychange", onVisibilityChange, capture);
+  return () => {
+    adjustMode = null;
+    stopGesture(false);
+    art.off("fullscreenWeb", onFullscreenWeb);
+    window.videoAPI.resetVideoBrightness?.();
+    window.clearTimeout(clickTimer);
+    listeners.abort();
+    hint.remove();
+  };
+}
+
 function Player({
   url,
   filterAds,
+  playbackSerial,
   resume,
+  title,
+  episodeLabel,
+  hasNextEpisode,
   onProgress,
   onEnded,
+  onNextEpisode,
   onFailure,
   playerInstance,
   tvFullscreen,
 }: {
   url: string;
   filterAds: boolean;
+  playbackSerial: number;
   resume: number;
+  title: string;
+  episodeLabel: string;
+  hasNextEpisode: boolean;
   onProgress: (position: number, duration: number) => void;
   onEnded: () => void;
+  onNextEpisode: () => void;
   onFailure: (position: number) => boolean;
   playerInstance: React.RefObject<Artplayer | null>;
   tvFullscreen: boolean;
 }) {
   const playerRef = useRef<HTMLDivElement>(null);
+  const artRef = useRef<Artplayer | null>(null);
+  const hlsRef = useRef<Hls | null>(null);
+  const hlsTypeRef = useRef<typeof Hls | null>(null);
+  const stopTouchGesturesRef = useRef<(() => void) | null>(null);
+  const fullscreenTitleRef = useRef<HTMLDivElement | null>(null);
+  const titleTextRef = useRef(`${title} · ${episodeLabel}`);
+  titleTextRef.current = `${title} · ${episodeLabel}`;
+  const hasNextRef = useRef(hasNextEpisode);
+  hasNextRef.current = hasNextEpisode;
+  const onNextRef = useRef(onNextEpisode);
+  onNextRef.current = onNextEpisode;
+  const sourceRef = useRef<{
+    fail: (message: string) => void;
+    clearTimers: () => void;
+    watchStall: () => void;
+    resume: number;
+    loaded: boolean;
+    shouldPlay: boolean;
+  } | null>(null);
   const onFailureRef = useRef(onFailure);
   onFailureRef.current = onFailure;
+  const onProgressRef = useRef(onProgress);
+  onProgressRef.current = onProgress;
+  const onEndedRef = useRef(onEnded);
+  onEndedRef.current = onEnded;
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const container = playerRef.current;
-    if (!container) return;
-    let art: Artplayer | undefined;
-    let hls: Hls | undefined;
+    if (fullscreenTitleRef.current)
+      fullscreenTitleRef.current.textContent = titleTextRef.current;
+    artRef.current?.template.$player.classList.toggle(
+      "has-next-episode",
+      hasNextEpisode,
+    );
+  }, [title, episodeLabel, hasNextEpisode]);
+
+  useEffect(() => {
+    return () => {
+      sourceRef.current?.clearTimers();
+      stopTouchGesturesRef.current?.();
+      hlsRef.current?.destroy();
+      const art = artRef.current;
+      // 网页全屏会把播放器节点移到 body，销毁前先放回原容器。
+      if (art?.fullscreenWeb) art.fullscreenWeb = false;
+      if (playerInstance.current === art) playerInstance.current = null;
+      art?.destroy(false);
+      artRef.current = null;
+      fullscreenTitleRef.current = null;
+    };
+  }, [playerInstance]);
+
+  useEffect(() => {
     let cancelled = false;
     let failed = false;
-    let startupTimeout: number;
+    let startupTimeout: number | undefined;
     let stallTimeout: number | undefined;
     setError("");
+    // 切集只更换视频源，保留 ArtPlayer 的 DOM 与全屏状态。
+    artRef.current?.video.pause();
+    const clearTimers = () => {
+      window.clearTimeout(startupTimeout);
+      window.clearTimeout(stallTimeout);
+      stallTimeout = undefined;
+    };
     const failPlayback = (message: string) => {
       if (cancelled || failed) return;
       failed = true;
-      window.clearTimeout(startupTimeout);
-      window.clearTimeout(stallTimeout);
-      if (!onFailureRef.current(art?.currentTime || resume)) setError(message);
+      clearTimers();
+      // 新线路尚未加载时，旧视频的结束时间不能当成新线路的续播位置。
+      const position = sourceRef.current?.loaded
+        ? artRef.current?.currentTime || resume
+        : resume;
+      if (!onFailureRef.current(position))
+        setError(message);
     };
+    const watchStall = () => {
+      if (stallTimeout !== undefined) return;
+      stallTimeout = window.setTimeout(() => {
+        const art = artRef.current;
+        if (art && !art.video.paused && !art.video.ended)
+          failPlayback("视频缓冲超时，请切换线路。");
+      }, 30000);
+    };
+    const source = {
+      fail: failPlayback,
+      clearTimers,
+      watchStall,
+      resume,
+      loaded: false,
+      shouldPlay: true,
+    };
+    sourceRef.current = source;
     // 有些失效线路既不返回视频数据，也不触发 media error，需要限定首次加载时间。
     startupTimeout = window.setTimeout(
       () => failPlayback("视频加载超时，请切换线路。"),
@@ -234,35 +534,47 @@ function Player({
     window.videoAPI
       .streamUrl(url, filterAds)
       .then(async (stream) => {
-        // 列表页无需加载播放器；进入播放页后再加载可缩短安卓首屏等待。
+        // 播放器与 HLS 库按需加载，切集时沿用已经创建的播放器。
         const [{ default: Artplayer }, hlsModule] = await Promise.all([
           import("artplayer"),
           stream.isHls ? import("hls.js") : Promise.resolve(null),
         ]);
-        const Hls = hlsModule?.default;
         if (cancelled) return;
-        art = new Artplayer({
+        hlsTypeRef.current = hlsModule?.default || null;
+        hlsRef.current?.destroy();
+        hlsRef.current = null;
+        const existing = artRef.current;
+        if (existing) {
+          existing.option.type = stream.isHls ? "m3u8" : "";
+          existing.url = stream.url;
+          return;
+        }
+        const container = playerRef.current;
+        if (!container) return;
+        const art = new Artplayer({
           container,
           url: stream.url,
           // 代理地址以 /stream 结尾，ArtPlayer 无法从后缀识别 HLS。
           ...(stream.isHls ? { type: "m3u8" as const } : {}),
           customType: {
             m3u8(video, source) {
+              const Hls = hlsTypeRef.current;
               if (Hls?.isSupported()) {
-                hls = new Hls({
+                hlsRef.current = new Hls({
                   maxBufferLength:
                     window.videoAPI.platform === "android" ? 20 : 40,
                   enableWorker: true,
                 });
-                hls.loadSource(source);
-                hls.attachMedia(video);
-                hls.on(Hls.Events.ERROR, (_, data) => {
-                  if (data.fatal) failPlayback(`视频加载失败：${data.details}`);
+                hlsRef.current.loadSource(source);
+                hlsRef.current.attachMedia(video);
+                hlsRef.current.on(Hls.Events.ERROR, (_, data) => {
+                  if (data.fatal)
+                    sourceRef.current?.fail(`视频加载失败：${data.details}`);
                 });
               } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
                 video.src = source;
               } else {
-                failPlayback("当前系统不支持 HLS 视频播放。");
+                sourceRef.current?.fail("当前系统不支持 HLS 视频播放。");
               }
             },
           },
@@ -277,7 +589,31 @@ function Player({
           fullscreen: window.videoAPI.platform !== "android",
           fullscreenWeb: !document.body.classList.contains("tv-body"),
         });
+        artRef.current = art;
         playerInstance.current = art;
+        const fullscreenTitle = document.createElement("div");
+        fullscreenTitle.className = "player-fullscreen-title";
+        fullscreenTitle.textContent = titleTextRef.current;
+        art.template.$player.append(fullscreenTitle);
+        fullscreenTitleRef.current = fullscreenTitle;
+        // 控件使用 ArtPlayer 的右侧排序，35 紧跟在设置按钮（30）之后。
+        art.controls.add({
+          name: "nextEpisode",
+          position: "right",
+          index: 35,
+          html: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polygon points="5 4 15 12 5 20 5 4"/>
+            <line x1="19" x2="19" y1="5" y2="19"/>
+          </svg>`,
+          tooltip: "播放下一集",
+          click: () => onNextRef.current(),
+          mounted: (element) => element.setAttribute("aria-label", "下一集"),
+        });
+        art.template.$player.classList.toggle(
+          "has-next-episode",
+          hasNextRef.current,
+        );
         if (window.videoAPI.platform !== "android") {
           art.controls.fullscreen?.addEventListener(
             "click",
@@ -295,40 +631,37 @@ function Player({
           art.on("fullscreenWeb", (fullscreen) => {
             window.videoAPI.setVideoFullscreen(fullscreen);
           });
+          if (!document.body.classList.contains("tv-body"))
+            stopTouchGesturesRef.current = enableMobilePlaybackGestures(art);
         }
         art.on("video:loadedmetadata", () => {
-          if (art && resume > 5 && resume < art.duration - 15)
-            art.currentTime = resume;
+          const current = sourceRef.current;
+          if (current) current.loaded = true;
+          const position = current?.resume || 0;
+          if (position > 5 && position < art.duration - 15)
+            art.currentTime = position;
         });
         art.on("video:timeupdate", () => {
-          if (art) onProgress(art.currentTime, art.duration || 0);
+          onProgressRef.current(art.currentTime, art.duration || 0);
         });
         art.on("video:canplay", () => {
-          window.clearTimeout(startupTimeout);
-          window.clearTimeout(stallTimeout);
-          stallTimeout = undefined;
+          const current = sourceRef.current;
+          current?.clearTimers();
+          if (current?.shouldPlay) {
+            current.shouldPlay = false;
+            void art.play().catch(() => {});
+          }
         });
         art.on("video:playing", () => {
-          window.clearTimeout(startupTimeout);
-          window.clearTimeout(stallTimeout);
-          stallTimeout = undefined;
+          sourceRef.current?.clearTimers();
         });
         // 播放途中若一直转圈且没有触发 error，也继续尝试右侧的其他线路。
-        const watchStall = () => {
-          if (stallTimeout !== undefined) return;
-          stallTimeout = window.setTimeout(() => {
-            if (art && !art.video.paused && !art.video.ended)
-              failPlayback("视频缓冲超时，请切换线路。");
-          }, 30000);
-        };
-        art.on("video:waiting", watchStall);
-        art.on("video:stalled", watchStall);
+        art.on("video:waiting", () => sourceRef.current?.watchStall());
+        art.on("video:stalled", () => sourceRef.current?.watchStall());
         art.on("video:pause", () => {
-          window.clearTimeout(startupTimeout);
-          window.clearTimeout(stallTimeout);
-          stallTimeout = undefined;
+          sourceRef.current?.clearTimers();
         });
-        art.on("video:ended", onEnded);
+        art.on("video:ended", () => onEndedRef.current());
         art.on("video:error", () => {
           const code = art?.video.error?.code;
           const message =
@@ -339,7 +672,7 @@ function Player({
                 : code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
                   ? "该地址未返回可播放的视频流，可能是网页播放地址或不支持的格式。"
                   : "该线路暂时无法播放，请切换线路或集数。";
-          failPlayback(message);
+          sourceRef.current?.fail(message);
         });
       })
       .catch((error) => {
@@ -347,15 +680,10 @@ function Player({
       });
     return () => {
       cancelled = true;
-      window.clearTimeout(startupTimeout);
-      window.clearTimeout(stallTimeout);
-      hls?.destroy();
-      // 播放器在网页全屏时会被移到 body，销毁前须先放回容器。
-      if (art?.fullscreenWeb) art.fullscreenWeb = false;
-      if (playerInstance.current === art) playerInstance.current = null;
-      art?.destroy(false);
+      clearTimers();
+      if (sourceRef.current === source) sourceRef.current = null;
     };
-  }, [url, filterAds]);
+  }, [url, filterAds, playbackSerial]);
 
   return (
     <div
@@ -477,6 +805,7 @@ export default function App() {
   const detailSerial = useRef(0);
   const progressSaved = useRef(0);
   const pageScroll = useRef<HTMLDivElement>(null);
+  const detailScroll = useRef<HTMLDivElement>(null);
   const searchBox = useRef<HTMLDivElement>(null);
   const playerInstance = useRef<Artplayer | null>(null);
   const failedLines = useRef(new Set<number>());
@@ -495,9 +824,44 @@ export default function App() {
     enabledSources[0];
 
   useEffect(() => {
+    if (window.videoAPI.platform !== "android" || isTv) return;
+    const viewport = window.visualViewport;
+    let fullHeight = Math.min(viewport?.height ?? window.innerHeight, window.innerHeight);
+    let width = viewport?.width ?? window.innerWidth;
+    const updateKeyboard = () => {
+      const height = Math.min(viewport?.height ?? window.innerHeight, window.innerHeight);
+      const currentWidth = viewport?.width ?? window.innerWidth;
+      if (Math.abs(currentWidth - width) > 50) fullHeight = height;
+      width = currentWidth;
+      fullHeight = Math.max(fullHeight, height);
+      const editing =
+        document.activeElement instanceof HTMLInputElement ||
+        document.activeElement instanceof HTMLTextAreaElement;
+      // 软键盘会缩短 WebView 可视高度，底部导航此时应让位给输入法。
+      document.body.classList.toggle(
+        "keyboard-open",
+        fullHeight - height > 120 &&
+          (editing || document.body.classList.contains("keyboard-open")),
+      );
+    };
+    viewport?.addEventListener("resize", updateKeyboard);
+    window.addEventListener("resize", updateKeyboard);
+    document.addEventListener("focusin", updateKeyboard);
+    document.addEventListener("focusout", updateKeyboard);
+    return () => {
+      viewport?.removeEventListener("resize", updateKeyboard);
+      window.removeEventListener("resize", updateKeyboard);
+      document.removeEventListener("focusin", updateKeyboard);
+      document.removeEventListener("focusout", updateKeyboard);
+      document.body.classList.remove("keyboard-open");
+    };
+  }, [isTv]);
+
+  useEffect(() => {
     if (window.videoAPI.platform !== "android") return;
     let active = true;
     let remove: (() => void) | undefined;
+    // 安卓端隐藏页面返回按钮后，由系统返回键完成相同的资源清理。
     const goBack = () => {
       if (tvPlayerFullscreen) setTvPlayerFullscreen(false);
       else if (playerInstance.current?.fullscreenWeb)
@@ -509,19 +873,29 @@ export default function App() {
       else if (customSourceOpen) setCustomSourceOpen(false);
       else if (selected) {
         ++detailSerial.current;
+        if (castingDevice) window.videoAPI.castStop().catch(() => {});
+        setCastingDevice(null);
         setSelected(null);
         setDetail(null);
         setEpisode(null);
       } else if (section === "search") {
+        ++searchSerial.current;
+        setSearchLoading(false);
         restoreScroll.current = searchOrigin.current.scrollTop;
         setSection(searchOrigin.current.section);
       } else if (section !== "home") setSection("home");
-      else CapacitorApp.exitApp();
+      else if (document.documentElement.dataset.harmony !== "true")
+        CapacitorApp.exitApp();
     };
-    CapacitorApp.addListener("backButton", goBack).then((listener) => {
-      if (active) remove = () => listener.remove();
-      else listener.remove();
-    });
+    if (document.documentElement.dataset.harmony === "true") {
+      window.addEventListener("harmony-back", goBack);
+      remove = () => window.removeEventListener("harmony-back", goBack);
+    } else {
+      CapacitorApp.addListener("backButton", goBack).then((listener) => {
+        if (active) remove = () => listener.remove();
+        else listener.remove();
+      });
+    }
     // 部分电视遥控器将返回键送为网页 Escape/Backspace，而非 Android backButton。
     const onTvBack = (event: KeyboardEvent) => {
       if (!document.body.classList.contains("tv-body")) return;
@@ -548,6 +922,7 @@ export default function App() {
     settingsOpen,
     showRecentSearches,
     customSourceOpen,
+    castingDevice,
     selected,
     section,
   ]);
@@ -648,13 +1023,7 @@ export default function App() {
         document.querySelector(".settings-drawer") ||
         document.querySelector(".detail-overlay");
       if (!scope) return;
-      // 详情加载完后把焦点从“返回列表”移到主要播放操作。
-      const focusPlay =
-        selected &&
-        !detailLoading &&
-        episode === null &&
-        document.activeElement?.matches(".detail-toolbar button");
-      if (scope.contains(document.activeElement) && !focusPlay) return;
+      if (scope.contains(document.activeElement)) return;
       const preferred =
         scope.querySelector<HTMLElement>("[data-tv-autofocus]") ||
         scope.querySelector<HTMLElement>("button:not(:disabled)");
@@ -727,6 +1096,18 @@ export default function App() {
     saveStorage("color-theme", theme);
     window.videoAPI.setTheme(theme);
   }, [theme]);
+
+  useEffect(() => {
+    // 鸿蒙状态栏位于网页外，按当前可见页面同步底色。
+    if (document.documentElement.dataset.harmony !== "true") return;
+    window.videoAPI.setSystemBarSurface?.(
+      settingsOpen
+        ? "settings"
+        : selected || section === "search"
+          ? "detail"
+          : "page",
+    );
+  }, [section, selected, settingsOpen]);
 
   useEffect(() => {
     pageScroll.current?.scrollTo(0, restoreScroll.current ?? 0);
@@ -976,6 +1357,9 @@ export default function App() {
     const serial = ++searchSerial.current;
     setQuery(term);
     setSearched(term);
+    // 窄屏安卓进入结果页后会隐藏搜索栏，先收起软键盘。
+    if (window.videoAPI.platform === "android" && window.innerWidth <= 700)
+      searchBox.current?.querySelector("input")?.blur();
     setSection("search");
     pageScroll.current?.scrollTo(0, 0);
     setSelected(null);
@@ -1247,9 +1631,8 @@ export default function App() {
     });
   }
 
-  function nextEpisode() {
+  function playNextEpisode() {
     if (
-      autoplay &&
       detail &&
       episode !== null &&
       episode + 1 < detail.lines[line].episodes.length
@@ -1258,6 +1641,10 @@ export default function App() {
       fallbackPosition.current = null;
       setEpisode(episode + 1);
     }
+  }
+
+  function nextEpisode() {
+    if (autoplay) playNextEpisode();
   }
 
   async function scanDevices() {
@@ -1487,7 +1874,9 @@ export default function App() {
       </aside>
 
       <div className="main-area">
-        <header className="topbar">
+        <header
+          className={`topbar ${section === "search" || selected ? "mobile-search-hidden" : ""}`}
+        >
           <span className="topbar-caption">DISCOVER YOUR NEXT FAVORITE</span>
           <div
             className={`search-box ${showRecentSearches && recentSearches.length ? "history-open" : ""}`}
@@ -2083,31 +2472,33 @@ export default function App() {
 
             {section === "search" && (
               <section className="results-section search-results">
-                <div className="search-toolbar">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      ++searchSerial.current;
-                      setSearchLoading(false);
-                      restoreScroll.current = searchOrigin.current.scrollTop;
-                      setSection(searchOrigin.current.section);
-                    }}
-                  >
-                    <ArrowLeft size={17} /> 返回列表
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => searchFor(searched)}
-                    title="重新搜索当前关键词"
-                    aria-label="重新搜索当前关键词"
-                  >
-                    <RefreshCw
-                      size={16}
-                      className={searchLoading ? "spin" : ""}
-                    />
-                    刷新
-                  </button>
-                </div>
+                {window.videoAPI.platform !== "android" && (
+                  <div className="search-toolbar">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        ++searchSerial.current;
+                        setSearchLoading(false);
+                        restoreScroll.current = searchOrigin.current.scrollTop;
+                        setSection(searchOrigin.current.section);
+                      }}
+                    >
+                      <ArrowLeft size={17} /> 返回列表
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => searchFor(searched)}
+                      title="重新搜索当前关键词"
+                      aria-label="重新搜索当前关键词"
+                    >
+                      <RefreshCw
+                        size={16}
+                        className={searchLoading ? "spin" : ""}
+                      />
+                      刷新
+                    </button>
+                  </div>
+                )}
                 <div className="section-heading">
                   <div>
                     <span className="section-kicker">SEARCH RESULTS</span>
@@ -2120,6 +2511,21 @@ export default function App() {
                       </span>
                     </h2>
                   </div>
+                  {window.videoAPI.platform === "android" && (
+                    <button
+                      className="search-refresh"
+                      type="button"
+                      onClick={() => searchFor(searched)}
+                      title="重新搜索当前关键词"
+                      aria-label="重新搜索当前关键词"
+                    >
+                      <RefreshCw
+                        size={16}
+                        className={searchLoading ? "spin" : ""}
+                      />
+                      刷新
+                    </button>
+                  )}
                 </div>
                 <p className="search-subtitle">
                   来自 {enabled.length} 个已启用点播源 · 点击资源查看线路与选集
@@ -2302,22 +2708,24 @@ export default function App() {
 
       {selected && (
         <div className="detail-overlay">
-          <div className="detail-toolbar">
-            <button
-              onClick={() => {
-                ++detailSerial.current;
-                if (castingDevice) window.videoAPI.castStop().catch(() => {});
-                setCastingDevice(null);
-                setSelected(null);
-                setDetail(null);
-                setEpisode(null);
-              }}
-            >
-              <ArrowLeft size={19} /> 返回列表
-            </button>
-            <span>影片详情</span>
-          </div>
-          <div className="detail-scroll">
+          {window.videoAPI.platform !== "android" && (
+            <div className="detail-toolbar">
+              <button
+                onClick={() => {
+                  ++detailSerial.current;
+                  if (castingDevice) window.videoAPI.castStop().catch(() => {});
+                  setCastingDevice(null);
+                  setSelected(null);
+                  setDetail(null);
+                  setEpisode(null);
+                }}
+              >
+                <ArrowLeft size={19} /> 返回列表
+              </button>
+              <span>影片详情</span>
+            </div>
+          )}
+          <div className="detail-scroll" ref={detailScroll}>
             {detailLoading ? (
               <div className="loading detail-loading">
                 <LoaderCircle className="spin" size={24} /> 正在获取播放线路...
@@ -2353,24 +2761,29 @@ export default function App() {
                               <span>★ {selected.rating}</span>
                             )}
                           </div>
-                          <p>{detail.description || "暂无剧情介绍"}</p>
-                          {detail.actors && (
-                            <small>主演：{detail.actors}</small>
-                          )}
-                          <button
-                            className="primary-button"
-                            data-tv-autofocus
-                            onClick={() => {
-                              failedLines.current.clear();
-                              fallbackPosition.current = null;
-                              setEpisode(0);
-                            }}
-                            disabled={!playing}
-                          >
-                            <Play size={17} fill="currentColor" />{" "}
-                            {selectedHistory ? "继续播放" : "立即播放"}
-                          </button>
                         </div>
+                        <p>
+                          {detail.description || "暂无剧情介绍"}
+                        </p>
+                        {detail.actors && (
+                          <small className="detail-hero-actors">
+                            主演：{detail.actors}
+                          </small>
+                        )}
+                        <button
+                          className="primary-button"
+                          data-tv-autofocus
+                          onClick={() => {
+                            failedLines.current.clear();
+                            fallbackPosition.current = null;
+                            setEpisode(0);
+                            detailScroll.current?.scrollTo(0, 0);
+                          }}
+                          disabled={!playing}
+                        >
+                          <Play size={17} fill="currentColor" />{" "}
+                          {selectedHistory ? "继续播放" : "立即播放"}
+                        </button>
                       </div>
                     ) : (
                       playing && (
@@ -2392,9 +2805,15 @@ export default function App() {
                             </div>
                           ) : (
                             <Player
-                              key={`${line}-${episode}-${playing.url}-${filterAds}-${playbackSerial}`}
+                              key={`${selected.sourceUrl}-${selected.id}`}
                               url={playing.url}
                               filterAds={filterAds}
+                              playbackSerial={playbackSerial}
+                              title={detail.title}
+                              episodeLabel={playing.label}
+                              hasNextEpisode={
+                                episode + 1 < detail.lines[line].episodes.length
+                              }
                               resume={
                                 fallbackPosition.current ??
                                 (selectedHistory?.line === line &&
@@ -2404,6 +2823,7 @@ export default function App() {
                               }
                               onProgress={recordProgress}
                               onEnded={nextEpisode}
+                              onNextEpisode={playNextEpisode}
                               onFailure={(position) => {
                                 if (!detail || episode === null) return false;
                                 failedLines.current.add(line);
@@ -2464,11 +2884,7 @@ export default function App() {
                                 {episode + 1 <
                                   detail.lines[line].episodes.length && (
                                   <button
-                                    onClick={() => {
-                                      failedLines.current.clear();
-                                      fallbackPosition.current = null;
-                                      setEpisode(episode + 1);
-                                    }}
+                                    onClick={playNextEpisode}
                                   >
                                     <SkipForward size={17} /> 下一集
                                   </button>
@@ -2497,15 +2913,15 @@ export default function App() {
                                 {selected.type && <span>{selected.type}</span>}
                                 <span>来源：{selected.source}</span>
                               </div>
-                              {detail.actors && (
-                                <p className="player-details-actors">
-                                  主演：{detail.actors}
-                                </p>
-                              )}
-                              <p className="player-details-description">
-                                {detail.description || "暂无剧情介绍"}
-                              </p>
                             </div>
+                            <p className="player-details-description">
+                              {detail.description || "暂无剧情介绍"}
+                            </p>
+                            {detail.actors && (
+                              <p className="player-details-actors">
+                                主演：{detail.actors}
+                              </p>
+                            )}
                           </section>
                         </>
                       )
@@ -2562,6 +2978,8 @@ export default function App() {
                                 fallbackPosition.current = null;
                                 setEpisode(index);
                                 setPlaybackSerial((current) => current + 1);
+                                // 选集面板可能在长页面底部，开始播放后直接露出播放器。
+                                detailScroll.current?.scrollTo(0, 0);
                               }}
                               title={item.label}
                             >

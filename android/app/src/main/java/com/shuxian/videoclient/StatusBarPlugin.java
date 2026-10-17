@@ -6,7 +6,9 @@ import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.os.Build;
+import android.provider.Settings;
 import android.view.Window;
+import android.view.WindowManager;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
@@ -65,7 +67,49 @@ public class StatusBarPlugin extends Plugin {
                 activity.setRequestedOrientation(previousOrientation);
             }
             fullscreen = enterFullscreen;
+            if (!enterFullscreen) {
+                WindowManager.LayoutParams attributes = activity.getWindow().getAttributes();
+                attributes.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
+                activity.getWindow().setAttributes(attributes);
+            }
             applyColor(getActivity(), light, fullscreen);
+            call.resolve();
+        });
+    }
+
+    @PluginMethod
+    public void getBrightness(PluginCall call) {
+        getActivity().runOnUiThread(() -> {
+            float current = getActivity().getWindow().getAttributes().screenBrightness;
+            if (current < 0) {
+                int system = Settings.System.getInt(getActivity().getContentResolver(),
+                    Settings.System.SCREEN_BRIGHTNESS, 128);
+                current = system / 255f;
+            }
+            JSObject result = new JSObject();
+            result.put("brightness", current);
+            call.resolve(result);
+        });
+    }
+
+    @PluginMethod
+    public void setBrightness(PluginCall call) {
+        float brightness = Math.max(0.05f, Math.min(1f, call.getFloat("brightness", 0.5f)));
+        getActivity().runOnUiThread(() -> {
+            // 只调整当前播放窗口，不修改手机的系统亮度设置。
+            WindowManager.LayoutParams attributes = getActivity().getWindow().getAttributes();
+            attributes.screenBrightness = brightness;
+            getActivity().getWindow().setAttributes(attributes);
+            call.resolve();
+        });
+    }
+
+    @PluginMethod
+    public void resetBrightness(PluginCall call) {
+        getActivity().runOnUiThread(() -> {
+            WindowManager.LayoutParams attributes = getActivity().getWindow().getAttributes();
+            attributes.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
+            getActivity().getWindow().setAttributes(attributes);
             call.resolve();
         });
     }

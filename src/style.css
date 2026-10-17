@@ -21,6 +21,11 @@
   background: #edf3f7;
   font-synthesis: none;
 }
+html,
+body {
+  /* 允许页面滚动，阻止触屏浏览器把双指手势用于页面缩放。 */
+  touch-action: pan-x pan-y;
+}
 * {
   box-sizing: border-box;
 }
@@ -651,7 +656,8 @@ a {
   justify-content: space-between;
   margin-bottom: 14px;
 }
-.search-toolbar button {
+.search-toolbar button,
+.search-refresh {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -661,22 +667,43 @@ a {
   font-size: 12px;
   font-weight: 600;
 }
-.search-toolbar button:hover {
+.search-toolbar button:hover,
+.search-refresh:hover {
   color: #54d7ee;
 }
-.search-toolbar button:last-child {
+.search-toolbar button:last-child,
+.search-refresh {
   padding: 6px 10px;
   border: 1px solid #31495b;
   border-radius: 7px;
 }
-.light .search-toolbar button {
+.light .search-toolbar button,
+.light .search-refresh {
   color: #58788d;
 }
-.light .search-toolbar button:hover {
+.light .search-toolbar button:hover,
+.light .search-refresh:hover {
   color: #168eaa;
 }
-.light .search-toolbar button:last-child {
+.light .search-toolbar button:last-child,
+.light .search-refresh {
   border-color: #cbdde6;
+}
+.platform-android .search-results .section-heading {
+  align-items: flex-end;
+  flex-wrap: nowrap;
+}
+.platform-android .search-results .section-heading > div {
+  min-width: 0;
+}
+.platform-android .search-results .section-heading h2 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.platform-android .search-refresh {
+  flex: none;
+  white-space: nowrap;
 }
 .section-heading {
   display: flex;
@@ -1238,9 +1265,11 @@ a {
   border-radius: 14px;
   overflow: hidden;
   background: linear-gradient(105deg, #1a2b3b, #101a29);
-  display: flex;
-  align-items: center;
-  gap: 38px;
+  display: grid;
+  grid-template-columns: 215px minmax(0, 1fr);
+  align-content: center;
+  align-items: start;
+  gap: 16px 38px;
   padding: 32px;
 }
 .detail-hero > img {
@@ -1252,6 +1281,7 @@ a {
 }
 .detail-hero-copy {
   min-width: 0;
+  align-self: center;
 }
 .detail-hero h1 {
   font-size: 34px;
@@ -1264,17 +1294,27 @@ a {
   font-size: 12px;
 }
 .detail-hero p {
+  /* 简介从海报下方开始，使用卡片的完整宽度。 */
+  grid-column: 1 / -1;
   color: #adc0cd;
   font-size: 13px;
   line-height: 1.9;
   max-height: 114px;
   overflow: auto;
-  margin: 20px 0 13px;
+  margin: 0;
 }
 .detail-hero small {
   color: #829aaa;
   display: block;
   line-height: 1.6;
+}
+.detail-hero-actors,
+.detail-hero > .primary-button {
+  grid-column: 1 / -1;
+}
+.detail-hero > .primary-button {
+  justify-self: start;
+  margin-top: 0;
 }
 .primary-button {
   height: 41px;
@@ -1383,6 +1423,99 @@ a {
   width: 100%;
   height: 100%;
 }
+/* 标题跟随播放器节点进入系统/网页全屏，并与底部控制栏同步显示。 */
+.art-video-player .player-fullscreen-title {
+  display: none;
+  position: absolute;
+  z-index: 60;
+  top: 0;
+  right: 0;
+  left: 0;
+  padding: 18px max(24px, env(safe-area-inset-right)) 24px
+    max(24px, env(safe-area-inset-left));
+  background: linear-gradient(#000b, transparent);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.art-video-player.art-control-show:is(.art-fullscreen, .art-fullscreen-web)
+  .player-fullscreen-title,
+.tv-fullscreen .art-video-player.art-control-show .player-fullscreen-title {
+  display: block;
+}
+.art-video-player .art-controls .art-control-nextEpisode {
+  display: none;
+  width: var(--art-control-height, 40px);
+  padding: 0;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+.art-video-player .art-control-nextEpisode svg {
+  width: 21px;
+  height: 21px;
+  pointer-events: none;
+}
+.art-video-player.has-next-episode:is(.art-fullscreen, .art-fullscreen-web)
+  .art-control-nextEpisode,
+.tv-fullscreen .art-video-player.has-next-episode .art-control-nextEpisode {
+  display: flex;
+}
+/* 鸿蒙竖屏播放器较窄：收紧按钮并保留右侧空间，避免全屏键被裁掉。 */
+html[data-harmony="true"] .art-video-player.art-mobile {
+  --art-control-height: 32px;
+  --art-control-icon-size: 28px;
+}
+html[data-harmony="true"] .art-video-player.art-mobile .art-controls-left,
+html[data-harmony="true"] .art-video-player.art-mobile .art-controls-right {
+  margin: 0;
+}
+/* 全屏键保留图标和无障碍名称，不显示“网页全屏”悬浮提示。 */
+html[data-harmony="true"] .art-control-fullscreenWeb::before,
+html[data-harmony="true"] .art-control-fullscreenWeb::after {
+  display: none !important;
+}
+/* 横屏全屏时给圆角和手势区域留出距离，左右两侧按钮都可完整点击。 */
+html[data-harmony="true"] .art-video-player.art-fullscreen-web .art-bottom {
+  padding-right: max(32px, env(safe-area-inset-right));
+  padding-left: max(32px, env(safe-area-inset-left));
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
+.art-video-player .mobile-seek-hint {
+  position: absolute;
+  z-index: 80;
+  top: 50%;
+  right: 8%;
+  transform: translateY(-50%);
+  padding: 9px 14px;
+  border-radius: 24px;
+  background: #08141fd9;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  pointer-events: none;
+  opacity: 0;
+}
+.art-video-player .mobile-seek-hint.rewind {
+  right: auto;
+  left: 8%;
+}
+.art-video-player .mobile-seek-hint.adjust {
+  right: auto;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+.art-video-player .mobile-seek-hint.active {
+  opacity: 1;
+}
+/* 全屏时竖向滑动由播放器处理，避免浏览器滚动取消触摸手势。 */
+.art-video-player.art-fullscreen-web {
+  touch-action: none;
+}
 .casting-screen {
   display: flex;
   flex-direction: column;
@@ -1469,12 +1602,17 @@ a {
 .player-details {
   display: grid;
   grid-template-columns: 112px minmax(0, 1fr);
-  gap: 20px;
+  /* 左侧海报，右侧标题和标签；简介与主演信息各占整行。 */
+  align-items: start;
+  gap: 16px 20px;
   margin-top: 10px;
   padding: 20px;
   border: 1px solid #273c4d;
   border-radius: 12px;
   background: #121e2b;
+}
+.player-details-copy {
+  min-width: 0;
 }
 .player-details-cover {
   width: 112px;
@@ -1513,13 +1651,21 @@ a {
 }
 .player-details-actors,
 .player-details-description {
-  margin: 14px 0 0;
+  margin: 0;
   color: #a5b9c5;
   font-size: 12px;
   line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.player-details-description {
+  grid-column: 1 / -1;
+  min-width: 0;
 }
 .player-details-actors {
+  grid-column: 1 / -1;
   color: #c2d0d8;
+  padding-top: 12px;
+  border-top: 1px solid #2c3d4b;
 }
 .detail-loading {
   min-height: 70vh;
@@ -1999,6 +2145,15 @@ a {
     radial-gradient(circle at 58% 88%, #d9e2f3a8, transparent 38%);
   background-attachment: fixed;
 }
+/* 鸿蒙状态栏是纯色，页面渐变从同色开始过渡，避免两者交界处出现色带。 */
+html[data-harmony="true"] .app-shell.light,
+html[data-harmony="true"] .light .detail-overlay {
+  background-image:
+    linear-gradient(to bottom, #edf3f7, #edf3f700 96px),
+    radial-gradient(circle at 14% 12%, #cce2ea99, transparent 34%),
+    radial-gradient(circle at 88% 28%, #f3dcd599, transparent 32%),
+    radial-gradient(circle at 58% 88%, #d9e2f3a8, transparent 38%);
+}
 .light .sidebar {
   background: #ffffffbc;
   border-color: #ffffffd9;
@@ -2101,8 +2256,9 @@ a {
   color: #19384a;
 }
 .light .custom-source-menu {
+  /* 移动端禁用背景模糊时，菜单仍需完全遮住下面的海报。 */
+  background: #fff;
   box-shadow: 0 18px 40px #34475a38;
-  backdrop-filter: blur(20px);
 }
 .light .custom-source-menu button {
   color: #405f71;
@@ -2317,6 +2473,9 @@ a {
 .light .panel-tip {
   color: #59788c;
 }
+.light .player-details-actors {
+  border-color: #d2e1e9;
+}
 .light .line-list button,
 .light .episode-list button,
 .light .player-actions button {
@@ -2458,6 +2617,7 @@ a {
     grid-template-columns: minmax(0, 1fr) 240px;
   }
   .detail-hero {
+    grid-template-columns: 155px minmax(0, 1fr);
     gap: 20px;
   }
   .detail-hero > img {
@@ -2562,6 +2722,9 @@ html[data-theme="light"] body.android-body .startup-screen {
     border-right: 0;
     border-top: 1px solid #294052;
   }
+  body.keyboard-open .platform-android .sidebar {
+    display: none;
+  }
   .platform-android.light .sidebar {
     background: #fff;
     box-shadow: 0 -4px 16px #263c4e18;
@@ -2642,6 +2805,10 @@ html[data-theme="light"] body.android-body .startup-screen {
     height: 58px;
     padding: 0 10px;
     gap: 8px;
+  }
+  /* 搜索结果和详情在手机上直接使用内容区，避免顶部搜索栏占空间。 */
+  .platform-android .topbar.mobile-search-hidden {
+    display: none;
   }
   .platform-android .search-form {
     height: 42px;
@@ -2778,6 +2945,7 @@ html[data-theme="light"] body.android-body .startup-screen {
     gap: 12px;
   }
   .platform-android .detail-hero {
+    grid-template-columns: 96px minmax(0, 1fr);
     gap: 12px;
     padding: 12px;
   }
@@ -2790,8 +2958,7 @@ html[data-theme="light"] body.android-body .startup-screen {
     font-size: 20px;
   }
   .platform-android .detail-hero p {
-    margin: 8px 0;
-    max-height: 90px;
+    max-height: none;
     line-height: 1.5;
   }
   .platform-android .detail-facts {
@@ -2835,6 +3002,14 @@ html[data-theme="light"] body.android-body .startup-screen {
     max-width: calc(100vw - 20px);
     max-height: calc(100dvh - 32px);
     padding: 18px;
+  }
+}
+/* 触屏点击会保留 :hover，避免关闭设置页后按钮持续出现灰色底。 */
+@media (max-width: 700px) and (hover: none) {
+  .platform-android .sidebar .nav-item:hover,
+  .platform-android .sidebar .brand:hover {
+    background: none;
+    box-shadow: none;
   }
 }
 

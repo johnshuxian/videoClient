@@ -3,7 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <!-- Capacitor 给 WebView 留出系统栏空间，状态栏显示应用窗口的底色。 -->
-    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <!-- 所有页面使用同一个入口；禁止双指缩放，保留正常滚动。 -->
+    <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no" />
     <title>影窗 · 发现好电影</title>
     <style>
       /* React 脚本加载前先显示本地内容，避免窗口出现一整块黑色。 */
