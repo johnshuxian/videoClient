@@ -94,11 +94,20 @@ public class DlnaPlugin extends Plugin {
                     }
                 }
             }
+            if (lanNetwork == null) {
+                JSObject result = new JSObject();
+                result.put("items", new JSArray());
+                JSArray warnings = new JSArray();
+                warnings.put("DLNA 需要手机和电视连接到同一局域网；仅使用移动数据无法发现电视。");
+                result.put("warnings", warnings);
+                call.resolve(result);
+                return;
+            }
             try {
                 if (lock != null) lock.acquire();
-                // 优先使用 Wi-Fi/以太网，避免手机默认走移动数据或 VPN 时把组播发错网络。
+                // 将 SSDP 组播和设备描述请求都固定在 Wi-Fi/以太网，避免走移动数据或 VPN。
                 try (DatagramSocket socket = new DatagramSocket()) {
-                    if (lanNetwork != null) lanNetwork.bindSocket(socket);
+                    lanNetwork.bindSocket(socket);
                     InetAddress multicast = InetAddress.getByName("239.255.255.250");
                     long started = SystemClock.elapsedRealtime();
                     long deadline = started + 4000;

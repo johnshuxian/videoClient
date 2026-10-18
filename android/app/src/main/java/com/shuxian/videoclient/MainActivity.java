@@ -18,7 +18,7 @@ public class MainActivity extends BridgeActivity {
         getBridge().getWebView().getSettings().setSupportZoom(false);
         getBridge().getWebView().getSettings().setBuiltInZoomControls(false);
         // WebView 加载前先恢复上次应用配色，避免状态栏闪过另一种颜色。
-        boolean light = !getPreferences(Context.MODE_PRIVATE).getBoolean("dark", true);
+        boolean light = !getPreferences(Context.MODE_PRIVATE).getBoolean("dark", false);
         getWindow().getDecorView().post(() -> StatusBarPlugin.applyColor(this, light, false));
     }
 }

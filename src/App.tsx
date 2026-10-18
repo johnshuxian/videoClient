@@ -787,7 +787,7 @@ export default function App() {
   const [theme, setTheme] = useState<"dark" | "light">(
     readStorage(
       "color-theme",
-      window.videoAPI.platform === "android" ? "dark" : "light",
+      "light",
     ),
   );
   const filterAds = true;
@@ -1743,7 +1743,7 @@ export default function App() {
     }
     if (!force &&
       Date.now() - progressSaved.current <
-      (window.videoAPI.platform === "android" ? 15000 : 4000)
+      4000
     ) return;
     progressSaved.current = Date.now();
     const item: HistoryItem = {
@@ -1793,7 +1793,20 @@ export default function App() {
       setDevices(found.items);
       setCastWarnings(found.warnings);
     } catch (error) {
-      setCastError(`发现电视失败：${(error as Error).message}`);
+      let message = "";
+      if (error instanceof Error) message = error.message;
+      else if (typeof error === "string") message = error;
+      else if (
+        error &&
+        typeof error === "object" &&
+        "message" in error &&
+        typeof error.message === "string"
+      ) {
+        message = error.message;
+      }
+      if (!message || message.includes("[object"))
+        message = "请连接电视所在的 Wi-Fi 局域网后重试。";
+      setCastError(`发现电视失败：${message}`);
     } finally {
       setCastBusy(false);
     }
@@ -2923,7 +2936,9 @@ export default function App() {
               </div>
             ) : (
               detail && (
-                <div className="detail-content">
+                <div
+                  className={`detail-content${episode === null ? " detail-content-intro" : ""}`}
+                >
                   <div className="detail-main">
                     {episode === null ? (
                       <div className="detail-hero">

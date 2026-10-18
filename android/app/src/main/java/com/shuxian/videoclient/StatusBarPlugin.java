@@ -28,7 +28,7 @@ public class StatusBarPlugin extends Plugin {
     @Override
     public void load() {
         super.load();
-        light = !getActivity().getPreferences(Context.MODE_PRIVATE).getBoolean("dark", true);
+        light = !getActivity().getPreferences(Context.MODE_PRIVATE).getBoolean("dark", false);
     }
 
     @PluginMethod

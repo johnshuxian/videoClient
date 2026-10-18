@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 启动页用独立的正方形矢量图，图案留在系统图标的安全区域内。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="288dp"
+    android:height="288dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <group
+        android:pivotX="512"
+        android:pivotY="512"
+        android:scaleX="0.44"
+        android:scaleY="0.44">
+        <path android:pathData="M246,22 H778 C901.7,22 1002,122.3 1002,246 V778 C1002,901.7 901.7,1002 778,1002 H246 C122.3,1002 22,901.7 22,778 V246 C22,122.3 122.3,22 246,22 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:startX="22" android:startY="22"
+                    android:endX="1002" android:endY="1002"
+                    android:type="linear">
+                    <item android:offset="0" android:color="#122d41" />
+                    <item android:offset="1" android:color="#081522" />
+                </gradient>
+            </aapt:attr>
+        </path>
+        <path android:pathData="M319,198 H705 C787.8,198 855,265.2 855,348 V676 C855,758.8 787.8,826 705,826 H319 C236.2,826 169,758.8 169,676 V348 C169,265.2 236.2,198 319,198 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:startX="169" android:startY="198"
+                    android:endX="855" android:endY="826"
+                    android:type="linear">
+                    <item android:offset="0" android:color="#56e3f3" />
+                    <item android:offset="1" android:color="#06abd4" />
+                </gradient>
+            </aapt:attr>
+        </path>
+        <path
+            android:fillColor="#09202d"
+            android:pathData="M423,347 C423,320 452,303 476,317 L728,475 C751,489 751,521 728,535 L476,694 C452,709 423,691 423,664 Z" />
+    </group>
+</vector>

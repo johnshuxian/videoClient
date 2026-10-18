@@ -1267,6 +1267,38 @@ a {
   grid-template-columns: minmax(0, 1fr) 285px;
   gap: 24px;
 }
+@media (min-width: 901px) {
+  /* 详情介绍视图占满工具栏下方的可用高度，让左侧内容卡片随页面撑开。 */
+  .detail-content-intro {
+    min-height: 100%;
+  }
+  .detail-content-intro .detail-main {
+    display: flex;
+  }
+  .detail-content-intro .detail-hero {
+    flex: 1;
+  }
+}
+@media (orientation: landscape) and (min-width: 901px) and (max-height: 900px) {
+  /* 安卓大屏横屏高度有限，缩小海报后让介绍和播放按钮更容易完整显示。 */
+  .platform-android .detail-content-intro {
+    min-height: 100%;
+    padding-top: 16px;
+    padding-bottom: 16px;
+  }
+  .platform-android .detail-content-intro .detail-hero {
+    grid-template-columns: 145px minmax(0, 1fr);
+    gap: 14px 24px;
+    padding: 20px;
+  }
+  .platform-android .detail-content-intro .detail-hero > img {
+    width: 145px;
+    height: 218px;
+  }
+  .platform-android .detail-content-intro .detail-hero h1 {
+    font-size: 28px;
+  }
+}
 .detail-main {
   min-width: 0;
 }
@@ -2686,14 +2718,8 @@ body.android-body {
     "DM Sans", "HarmonyOS Sans SC", MiSans, "Noto Sans CJK SC", system-ui,
     sans-serif;
 }
-body.android-body .startup-screen {
-  color: #eaf2fa;
-}
 html[data-theme="light"] body.android-body {
   background: #edf3f7;
-}
-html[data-theme="light"] body.android-body .startup-screen {
-  color: #172b3c;
 }
 /* 全屏播放器已移到 body，只保留播放器和黑底，避免详情页露出。 */
 html body.android-body.player-web-fullscreen {
@@ -3080,10 +3106,10 @@ body.player-web-fullscreen .app-shell {
   }
 }
 
-/* 手机端沿用系统常见的横向推入；搜索内容只做短暂显现，避免整页漂浮感。 */
+/* 窄屏安卓页面统一从右侧滑入，搜索结果和详情页保持一致。 */
 @media (max-width: 700px) {
   body:not(.tv-body) .platform-android .search-results {
-    animation: mobile-search-in 140ms ease-out both;
+    animation: mobile-page-in 260ms cubic-bezier(0.2, 0, 0, 1) both;
   }
   body:not(.tv-body) .platform-android .detail-overlay {
     animation: mobile-page-in 260ms cubic-bezier(0.2, 0, 0, 1) both;
@@ -3102,14 +3128,6 @@ body.player-web-fullscreen .app-shell {
   }
   body:not(.tv-body) .platform-android .is-closing .settings-drawer {
     animation: mobile-page-out 260ms cubic-bezier(0.4, 0, 1, 1) both;
-  }
-}
-@keyframes mobile-search-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
   }
 }
 @keyframes mobile-page-in {

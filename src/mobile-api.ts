@@ -171,9 +171,9 @@ export async function createMobileVideoAPI(
   if (isTv) document.body.classList.add("tv-body");
   root.dataset.startupStep = "读取本机设置";
   const settings = await native.loadSettings();
-  // 首次安装默认深色；已有设置仍优先，避免覆盖用户手动选择。
+  // 首次安装默认浅色；已有设置仍优先，避免覆盖用户手动选择。
   const initialTheme =
-    settings.get("color-theme") === "light" ? "light" : "dark";
+    settings.get("color-theme") === "dark" ? "dark" : "light";
   document.documentElement.dataset.theme = initialTheme;
   root.dataset.startupStep = "设置界面主题";
   await statusBar.setTheme({ theme: initialTheme });
