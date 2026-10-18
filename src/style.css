@@ -2174,34 +2174,6 @@ html[data-harmony="true"] .art-video-player.art-fullscreen-web .art-bottom {
 .cast-modal .load-more {
   margin-top: 15px;
 }
-.airplay-pairing {
-  padding: 14px;
-  border: 1px solid #335164;
-  border-radius: 9px;
-  color: #ecf6f9;
-  font-size: 12px;
-}
-.airplay-pairing > div {
-  display: flex;
-  gap: 8px;
-  margin-top: 11px;
-}
-.airplay-pairing input {
-  min-width: 0;
-  flex: 1;
-  padding: 9px 11px;
-  border: 1px solid #426478;
-  border-radius: 7px;
-  background: #102334;
-  color: #ecf6f9;
-}
-.airplay-pairing button {
-  padding: 9px 18px;
-  border-radius: 7px;
-  background: #168ba4;
-  color: white;
-}
-
 /* 浅色模式保留原有层级和强调色，只调整表面、文字与边框。 */
 :root[data-theme="light"] {
   color: #172b3c;
@@ -2673,15 +2645,6 @@ html[data-harmony="true"] .light .detail-overlay {
   background: #f2f8fb;
   border-color: #c9dce5;
   color: #244156;
-}
-.light .airplay-pairing {
-  border-color: #c9dce5;
-  color: #1d4257;
-}
-.light .airplay-pairing input {
-  border-color: #c9dce5;
-  background: #f2f8fb;
-  color: #1d4257;
 }
 @media (max-width: 1200px) {
   .poster-grid {

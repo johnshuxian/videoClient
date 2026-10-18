@@ -32,18 +32,12 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      - uses: actions/setup-python@v7
-        with:
-          python-version: '3.11'
-
       - run: npm ci
       - run: npm test
 
-      # The bundled AirPlay helper must be built on the same OS and CPU as the installer.
       - name: Package installer
         run: |
           npm run build:web
-          npm run build:airplay
           npx electron-builder --${{ matrix.platform }} --${{ matrix.arch }} --publish=never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'

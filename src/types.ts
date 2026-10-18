@@ -46,8 +46,7 @@ export type Device = {
   host: string;
   localAddress?: string;
   controlUrl?: string;
-  type: "dlna" | "airplay";
-  paired: boolean;
+  type: "dlna";
 };
 export type HistoryItem = {
   key: string;
@@ -99,8 +98,6 @@ declare global {
         filterAds: boolean,
       ) => Promise<{ url: string; isHls: boolean }>;
       devices: () => Promise<{ items: Device[]; warnings: string[] }>;
-      airplayPairBegin: (id: string) => Promise<{ pinRequired: boolean }>;
-      airplayPairFinish: (pin: string) => Promise<boolean>;
       cast: (
         device: Device,
         url: string,

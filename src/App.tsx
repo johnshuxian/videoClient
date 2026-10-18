@@ -896,14 +896,17 @@ export default function App() {
   const [episodeOrder, setEpisodeOrder] = useState<"ascending" | "descending">(
     "ascending",
   );
-  const [devices, setDevices] = useState<Device[]>(readStorage("devices", []));
+  // 旧版本保存的 AirPlay 设备不应再出现在投屏列表中。
+  const [devices, setDevices] = useState<Device[]>(() =>
+    readStorage<Device[]>("devices", []).filter(
+      (device) => device.type === "dlna",
+    ),
+  );
   const [castOpen, setCastOpen] = useState(false);
   const [castBusy, setCastBusy] = useState(false);
   const [castError, setCastError] = useState("");
   const [castWarnings, setCastWarnings] = useState<string[]>([]);
   const [castingDevice, setCastingDevice] = useState<Device | null>(null);
-  const [pairingDevice, setPairingDevice] = useState<Device | null>(null);
-  const [airplayPin, setAirplayPin] = useState("");
   const searchSerial = useRef(0);
   // 返回搜索前的列表时，保留分类和原来的浏览位置。
   const searchOrigin = useRef<{
@@ -1864,7 +1867,6 @@ export default function App() {
     setCastBusy(true);
     setCastError("");
     setCastWarnings([]);
-    setPairingDevice(null);
     try {
       const found = await window.videoAPI.devices();
       setDevices(found.items);
@@ -1907,7 +1909,7 @@ export default function App() {
     castClock.current = {
       deviceId: device.id,
       url: current.url,
-      position: device.type === "airplay" ? 0 : startPosition,
+      position: startPosition,
       at: Date.now(),
       duration: Number.isFinite(playerDuration) && playerDuration > 0
         ? playerDuration
@@ -1915,26 +1917,16 @@ export default function App() {
           ? selectedHistory.duration
           : 0,
     };
-    return startPosition;
   }
 
   async function castTo(device: Device) {
     setCastBusy(true);
     setCastError("");
     try {
-      if (device.type === "airplay" && !device.paired) {
-        setPairingDevice(device);
-        setAirplayPin("");
-        await window.videoAPI.airplayPairBegin(device.id);
-        return;
-      }
-      const startPosition = await castEpisode(device, episode ?? 0);
+      await castEpisode(device, episode ?? 0);
       setCastingDevice(device);
       setCastOpen(false);
-      if (device.type === "airplay" && startPosition > 0)
-        setCastError("AirPlay 当前不支持从续播进度开始，已从头投放。");
     } catch (error) {
-      if (device.type === "airplay") setPairingDevice(null);
       setCastError(`投屏失败：${(error as Error).message}`);
     } finally {
       setCastBusy(false);
@@ -1966,34 +1958,10 @@ export default function App() {
     setCastBusy(true);
     setCastError("");
     try {
-      const startPosition = await castEpisode(castingDevice, index);
-      if (castingDevice.type === "airplay" && startPosition > 0)
-        setCastError("AirPlay 当前不支持从续播进度开始，已从头投放。");
+      await castEpisode(castingDevice, index);
     } catch (error) {
       setCastError(`切换集数投屏失败：${(error as Error).message}`);
       setCastingDevice(null);
-    } finally {
-      setCastBusy(false);
-    }
-  }
-
-  async function finishAirPlayPairing() {
-    if (!pairingDevice || !/^\d{4,6}$/.test(airplayPin)) return;
-    setCastBusy(true);
-    setCastError("");
-    try {
-      await window.videoAPI.airplayPairFinish(airplayPin);
-      const device = { ...pairingDevice, paired: true };
-      setDevices((previous) =>
-        previous.map((item) => (item.id === device.id ? device : item)),
-      );
-      setPairingDevice(null);
-      setAirplayPin("");
-      await castTo(device);
-    } catch (error) {
-      setCastError(`AirPlay 配对失败：${(error as Error).message}`);
-      setPairingDevice(null);
-      setAirplayPin("");
     } finally {
       setCastBusy(false);
     }
@@ -3591,9 +3559,7 @@ export default function App() {
             <p>
               确保{window.videoAPI.platform === "android" ? "手机" : "电脑"}
               和电视在同一局域网。
-              {window.videoAPI.platform === "android"
-                ? "支持 DLNA 视频接收设备。"
-                : "支持 DLNA 和 AirPlay 视频接收设备。"}
+              支持 DLNA 视频接收设备。
             </p>
             {castBusy && (
               <div className="loading">
@@ -3607,40 +3573,6 @@ export default function App() {
                 {warning}
               </div>
             ))}
-            {pairingDevice && (
-              <form
-                className="airplay-pairing"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  finishAirPlayPairing();
-                }}
-              >
-                <label htmlFor="airplay-pin">
-                  输入电视「{pairingDevice.name}」显示的 AirPlay 验证码
-                </label>
-                <div>
-                  <input
-                    id="airplay-pin"
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    value={airplayPin}
-                    onChange={(event) =>
-                      setAirplayPin(
-                        event.target.value.replace(/\D/g, "").slice(0, 6),
-                      )
-                    }
-                    placeholder="4 至 6 位验证码"
-                    autoFocus
-                  />
-                  <button
-                    type="submit"
-                    disabled={castBusy || !/^\d{4,6}$/.test(airplayPin)}
-                  >
-                    连接
-                  </button>
-                </div>
-              </form>
-            )}
             {!castBusy && devices.length === 0 && (
               <div className="empty small">
                 <Tv size={30} />
@@ -3654,7 +3586,7 @@ export default function App() {
             )}
             {devices.map((device) => (
               <button
-                key={`${device.type}:${device.id}`}
+                key={device.id}
                 className="device-row"
                 onClick={() => castTo(device)}
                 disabled={castBusy}
@@ -3663,15 +3595,13 @@ export default function App() {
                 <span>
                   {device.name}
                   <small>
-                    {device.type === "airplay" ? "AirPlay" : "DLNA"} ·{" "}
-                    {device.host}
-                    {!device.paired ? " · 需配对" : ""}
+                    DLNA · {device.host}
                   </small>
                 </span>
                 <ArrowRight size={17} />
               </button>
             ))}
-            {!castBusy && !pairingDevice && (
+            {!castBusy && (
               <button className="load-more" onClick={scanDevices}>
                 <RefreshCw size={15} /> 重新搜索
               </button>

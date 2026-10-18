@@ -29,11 +29,9 @@ test("设置、设备和播放记录写入指定目录后，重新启动仍能�
       id: "tv-1",
       name: "客厅电视",
       host: "192.0.2.10",
-      type: "airplay",
-      paired: true,
+      type: "dlna",
     },
   ]);
-  first.set("airplay-credentials", { "tv-1": "pairing-token" });
   first.set("history", [{ key: "movie-1", position: 120, duration: 3600 }]);
   first.close();
 
@@ -44,7 +42,6 @@ test("设置、设备和播放记录写入指定目录后，重新启动仍能�
   assert.equal(reopened.get("custom-source-url"), "https://example.com");
   assert.equal(reopened.get("filter-ads"), false);
   assert.equal(reopened.get("devices")[0].name, "客厅电视");
-  assert.equal(reopened.get("airplay-credentials")["tv-1"], "pairing-token");
   assert.equal(reopened.get("history")[0].position, 120);
   assert.equal(reopened.get("color-theme"), undefined);
   reopened.set("filter-ads", true);

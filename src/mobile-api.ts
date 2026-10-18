@@ -488,12 +488,6 @@ export async function createMobileVideoAPI(
       };
     },
     devices: () => dlna.devices(),
-    airplayPairBegin: async () => {
-      throw new Error("移动端暂不支持 AirPlay");
-    },
-    airplayPairFinish: async () => {
-      throw new Error("移动端暂不支持 AirPlay");
-    },
     cast: async (device, url, title, filterAds, startPosition = 0) => {
       const playable = await playableUrl(url);
       const stream = await proxy.url({

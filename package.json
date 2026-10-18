@@ -6,12 +6,11 @@
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron .\"",
-    "build": "npm run build:web && npm run build:airplay && electron-builder",
+    "build": "npm run build:web && electron-builder",
     "build:web": "tsc -b && vite build",
     "build:web:harmony": "tsc -b && vite build --mode harmony",
-    "build:airplay": "node scripts/build-airplay.mjs",
-    "dist:win": "npm run build:web && npm run build:airplay && electron-builder --win",
-    "dist:mac": "npm run build:web && npm run build:airplay && electron-builder --mac",
+    "dist:win": "npm run build:web && electron-builder --win",
+    "dist:mac": "npm run build:web && electron-builder --mac",
     "dist:android": "npm run build:web && cap sync android && cd android && gradlew.bat assembleDebug",
     "sync:harmony": "npm run build:web:harmony && node scripts/sync-harmony.mjs",
     "test": "node --test electron/*.test.cjs",
@@ -60,16 +59,6 @@
       "artifactName": "videoClient-v${version}-windows-${arch}.${ext}",
       "target": [
         "nsis"
-      ],
-      "extraResources": [
-        {
-          "from": "build/airplay/airplay-bridge.exe",
-          "to": "airplay-bridge.exe"
-        },
-        {
-          "from": "electron/airplay-license.md",
-          "to": "airplay-license.md"
-        }
       ]
     },
     "nsis": {
@@ -83,21 +72,8 @@
         "dmg"
       ],
       "extendInfo": {
-        "NSLocalNetworkUsageDescription": "影窗需要访问局域网，以发现电视并向电视投送视频。",
-        "NSBonjourServices": [
-          "_airplay._tcp"
-        ]
-      },
-      "extraResources": [
-        {
-          "from": "build/airplay/airplay-bridge",
-          "to": "airplay-bridge"
-        },
-        {
-          "from": "electron/airplay-license.md",
-          "to": "airplay-license.md"
-        }
-      ]
+        "NSLocalNetworkUsageDescription": "影窗需要访问局域网，以发现电视并向电视投送视频。"
+      }
     }
   }
 }

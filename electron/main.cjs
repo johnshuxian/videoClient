@@ -6,16 +6,12 @@ const os = require("node:os");
 const crypto = require("node:crypto");
 const { Readable } = require("node:stream");
 const { pipeline } = require("node:stream/promises");
+const { setTimeout: delay } = require("node:timers/promises");
 const {
   parseEpisodes,
   rewriteManifest,
   videoUrlFromSharePage,
 } = require("./media.cjs");
-const {
-  requestAirPlay,
-  closeAirPlay,
-  setAirPlayEventHandler,
-} = require("./airplay.cjs");
 const { createSettingsStore } = require("./settings.cjs");
 const { discoverDlnaOnInterfaces } = require("./dlna-discovery.cjs");
 
@@ -31,7 +27,6 @@ const sourceTestRuns = new Map();
 let activeSearch;
 let proxyPort = 0;
 let currentCast = null;
-let castSession = 0;
 let mainWindow;
 let settingsStore;
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -41,36 +36,22 @@ async function stopCurrentCast() {
   if (!currentCast) return;
   const cast = currentCast;
   currentCast = null;
-  if (cast.type === "airplay") await requestAirPlay("stop");
-  else {
-    try {
-      await cast.control.stop();
-    } finally {
-      cast.control.dispose();
-    }
+  try {
+    await cast.control.stop();
+  } finally {
+    cast.control.dispose();
   }
 }
 
-function reportCastEnded(cast, error) {
+function reportCastEnded(cast) {
   if (currentCast !== cast) return;
   currentCast = null;
-  if (cast.type === "dlna") cast.control.dispose();
+  cast.control.dispose();
   mainWindow?.webContents.send("cast:ended", {
     deviceId: cast.device.id,
-    error: error || "",
+    error: "",
   });
 }
-
-setAirPlayEventHandler((message) => {
-  const cast = currentCast;
-  if (cast?.type === "airplay" && cast.sessionId === message.sessionId) {
-    // 先排队释放已结束的 AirPlay 连接，再通知页面切换下一集。
-    requestAirPlay("stop").catch((error) =>
-      console.warn("AirPlay 连接清理失败：", error),
-    );
-    reportCastEnded(cast, message.error);
-  }
-});
 
 async function fetchWithTimeout(url, ms = 9000, headers = {}, cancelSignal) {
   const response = await fetch(url, {
@@ -330,7 +311,6 @@ app.on("window-all-closed", () => {
 app.on("before-quit", () => {
   if (proxyServer.listening) proxyServer.close();
   settingsStore?.close();
-  closeAirPlay();
 });
 app.on("activate", () => {
   if (hasSingleInstanceLock && BrowserWindow.getAllWindows().length === 0)
@@ -688,127 +668,92 @@ ipcMain.handle("stream-url", async (_, url, filterAds) => {
   };
 });
 ipcMain.handle("devices", async () => {
-  const [dlna, airplay] = await Promise.allSettled([
-    (async () => {
-      const { discoverDlnaDevices, DlnaControlPoint } =
-        await import("@sonn-audio/node-upnp");
-      let found;
-      if (process.platform === "darwin") {
-        // 同时扫描默认出口和各网卡，避免 VPN 或多网卡让整个设备列表为空。
-        const [defaultScan, interfaceScan] = await Promise.allSettled([
-          discoverDlnaDevices({ timeoutMs: 3000 }),
-          discoverDlnaOnInterfaces(),
-        ]);
-        if (defaultScan.status === "rejected")
-          console.warn("DLNA 默认扫描失败：", defaultScan.reason);
-        if (interfaceScan.status === "rejected")
-          console.warn("DLNA 逐网卡扫描失败：", interfaceScan.reason);
+  try {
+    const { discoverDlnaDevices, DlnaControlPoint } =
+      await import("@sonn-audio/node-upnp");
+    let found;
+    if (process.platform === "darwin") {
+      // 同时扫描默认出口和各网卡，避免 VPN 或多网卡让整个设备列表为空。
+      const [defaultScan, interfaceScan] = await Promise.allSettled([
+        discoverDlnaDevices({ timeoutMs: 3000 }),
+        discoverDlnaOnInterfaces(),
+      ]);
+      if (defaultScan.status === "rejected")
+        console.warn("DLNA 默认扫描失败：", defaultScan.reason);
+      if (interfaceScan.status === "rejected")
+        console.warn("DLNA 逐网卡扫描失败：", interfaceScan.reason);
+      if (
+        defaultScan.status === "rejected" &&
+        interfaceScan.status === "rejected"
+      )
+        throw new Error("默认扫描与逐网卡扫描均失败");
+      const byLocation = new Map();
+      for (const device of [
+        ...(defaultScan.status === "fulfilled" ? defaultScan.value : []),
+        ...(interfaceScan.status === "fulfilled" ? interfaceScan.value : []),
+      ]) {
         if (
-          defaultScan.status === "rejected" &&
-          interfaceScan.status === "rejected"
+          !byLocation.has(device.location) ||
+          !byLocation.get(device.location).controlUrl ||
+          device.localAddress
         )
-          throw new Error("默认扫描与逐网卡扫描均失败");
-        const byLocation = new Map();
-        for (const device of [
-          ...(defaultScan.status === "fulfilled" ? defaultScan.value : []),
-          ...(interfaceScan.status === "fulfilled" ? interfaceScan.value : []),
-        ]) {
-          if (
-            !byLocation.has(device.location) ||
-            !byLocation.get(device.location).controlUrl ||
-            device.localAddress
-          )
-            byLocation.set(device.location, device);
-        }
-        found = [...byLocation.values()];
-      } else {
-        found = await discoverDlnaDevices({ timeoutMs: 3000 });
+          byLocation.set(device.location, device);
       }
-      const checked = await Promise.all(
-        found.map(async (device) => {
-          if (process.platform === "darwin" && !device.controlUrl) return null;
-          const control = new DlnaControlPoint({ host: device.host });
-          try {
-            // 同一网络也会发现音箱；有明确能力表时只展示支持视频的设备。
-            // macOS 已完成逐网卡搜索时，不再用默认出口重新发现并丢失结果。
-            const formats =
-              process.platform === "darwin"
-                ? null
-                : await control.getSinkContentTypes();
-            if (
-              formats &&
-              !formats.some(
-                (type) =>
-                  type.startsWith("video/") ||
-                  type.startsWith("application/vnd.apple.mpegurl"),
-              )
+      found = [...byLocation.values()];
+    } else {
+      found = await discoverDlnaDevices({ timeoutMs: 3000 });
+    }
+    const checked = await Promise.all(
+      found.map(async (device) => {
+        if (process.platform === "darwin" && !device.controlUrl) return null;
+        const control = new DlnaControlPoint({ host: device.host });
+        try {
+          // 同一网络也会发现音箱；有明确能力表时只展示支持视频的设备。
+          // macOS 已完成逐网卡搜索时，不再用默认出口重新发现并丢失结果。
+          const formats =
+            process.platform === "darwin"
+              ? null
+              : await control.getSinkContentTypes();
+          if (
+            formats &&
+            !formats.some(
+              (type) =>
+                type.startsWith("video/") ||
+                type.startsWith("application/vnd.apple.mpegurl"),
             )
-              return null;
-            return {
-              id: device.location,
-              name: device.name || device.host,
-              host: device.host,
-              localAddress: device.localAddress,
-              controlUrl: device.controlUrl,
-              type: "dlna",
-              paired: true,
-            };
-          } catch (error) {
-            console.warn(`DLNA 设备 ${device.host} 能力检查失败：`, error);
+          )
             return null;
-          } finally {
-            control.dispose();
-          }
-        }),
-      );
-      return checked.filter(Boolean);
-    })(),
-    requestAirPlay("scan", {
-      credentials: settingsStore.get("airplay-credentials") || {},
-    }),
-  ]);
-  const warnings = [];
-  if (dlna.status === "rejected") warnings.push(`DLNA：${dlna.reason.message}`);
-  if (airplay.status === "rejected")
-    warnings.push(`AirPlay：${airplay.reason.message}`);
-  const items = [
-    ...(dlna.status === "fulfilled" ? dlna.value : []),
-    ...(airplay.status === "fulfilled" ? airplay.value : []),
-  ];
-  if (warnings.length < 2) settingsStore.set("devices", items);
-  return { items, warnings };
-});
-ipcMain.handle("airplay:pair-begin", (_, id) =>
-  requestAirPlay("pair_begin", { id }),
-);
-ipcMain.handle("airplay:pair-finish", async (_, pin) => {
-  const result = await requestAirPlay("pair_finish", { pin });
-  settingsStore.set("airplay-credentials", {
-    ...(settingsStore.get("airplay-credentials") || {}),
-    [result.id]: result.credentials,
-  });
-  settingsStore.set(
-    "devices",
-    (settingsStore.get("devices") || []).map((device) =>
-      device.type === "airplay" && device.id === result.id
-        ? { ...device, paired: true }
-        : device,
-    ),
-  );
-  return true;
+          return {
+            id: device.location,
+            name: device.name || device.host,
+            host: device.host,
+            localAddress: device.localAddress,
+            controlUrl: device.controlUrl,
+            type: "dlna",
+          };
+        } catch (error) {
+          console.warn(`DLNA 设备 ${device.host} 能力检查失败：`, error);
+          return null;
+        } finally {
+          control.dispose();
+        }
+      }),
+    );
+    const items = checked.filter(Boolean);
+    settingsStore.set("devices", items);
+    return { items, warnings: [] };
+  } catch (error) {
+    return { items: [], warnings: [`DLNA：${error.message}`] };
+  }
 });
 ipcMain.handle("cast", async (_, device, url, title, filterAds, startPosition = 0) => {
+  if (device.type !== "dlna") throw new Error("只支持 DLNA 投屏设备");
   const playable = await resolvePlayableUrl(url);
   const localIp = device.localAddress || (await getLanIp(device.host));
   const stream = proxyUrl(playable, filterAds, localIp);
   await stopCurrentCast();
-  const sessionId = ++castSession;
-  if (device.type === "airplay") {
-    await requestAirPlay("play", { id: device.id, url: stream, sessionId });
-    currentCast = { type: "airplay", device, url, sessionId };
-    return true;
-  }
-  const { DlnaControlPoint, buildDidl, buildSoapRequest } = await import("@sonn-audio/node-upnp");
+  const { DlnaControlPoint, buildDidl, buildSoapRequest, extractTag } =
+    await import("@sonn-audio/node-upnp");
   const mime = /\.m3u8(?:$|[?#])/i.test(playable)
     ? "application/vnd.apple.mpegurl"
     : "video/mp4";
@@ -826,11 +771,9 @@ ipcMain.handle("cast", async (_, device, url, title, filterAds, startPosition = 
     controlUrl: process.platform === "darwin" ? device.controlUrl : undefined,
   });
   const cast = {
-    type: "dlna",
     device,
     control,
     url,
-    sessionId,
     seenPlaying: false,
   };
   currentCast = cast;
@@ -870,10 +813,34 @@ ipcMain.handle("cast", async (_, device, url, title, filterAds, startPosition = 
       control.dispose();
     }
     if (ok && startPosition > 0) {
-      // node-upnp 的 setUri 会立即 Play，因此收到确认后再 Seek 到续播位置。
+      // TCL 等电视在 Play 回复时可能还没进入 PLAYING，过早 Seek 会被忽略。
       const totalSeconds = Math.floor(startPosition);
       const target = `${String(Math.floor(totalSeconds / 3600)).padStart(2, "0")}:${String(Math.floor(totalSeconds % 3600 / 60)).padStart(2, "0")}:${String(totalSeconds % 60).padStart(2, "0")}`;
       const serviceType = "urn:schemas-upnp-org:service:AVTransport:1";
+      for (let attempt = 0; attempt < 10; attempt++) {
+        await delay(500);
+        try {
+          const stateResponse = await fetch(control.controlUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "text/xml; charset=utf-8",
+              SOAPAction: `"${serviceType}#GetTransportInfo"`,
+            },
+            body: buildSoapRequest(serviceType, "GetTransportInfo"),
+            signal: AbortSignal.timeout(2000),
+          });
+          if (!stateResponse.ok) break;
+          const state = extractTag(
+            await stateResponse.text(),
+            "CurrentTransportState",
+          );
+          if (state === "PLAYING") break;
+        } catch {
+          // 不支持状态查询的电视仍尝试 Seek。
+          break;
+        }
+      }
+      // 部分电视短时间内仍把进度报告为 0，以 Seek 的响应判断是否接受续播。
       const response = await fetch(control.controlUrl, {
         method: "POST",
         headers: {
@@ -886,7 +853,8 @@ ipcMain.handle("cast", async (_, device, url, title, filterAds, startPosition = 
         }),
         signal: AbortSignal.timeout(5000),
       });
-      if (!response.ok) throw new Error(`电视不支持从指定进度开始播放（HTTP ${response.status}）`);
+      if (!response.ok)
+        throw new Error(`电视不支持从指定进度开始播放（HTTP ${response.status}）`);
     }
     return ok;
   } catch (error) {
@@ -900,40 +868,35 @@ ipcMain.handle("cast:progress", async () => {
   const cast = currentCast;
   if (!cast) return null;
   try {
-    let progress;
-    if (cast.type === "airplay") {
-      progress = await requestAirPlay("progress");
-    } else {
-      // node-upnp 暂无读取进度的方法，向它已发现的 AVTransport 地址查询。
-      const { buildSoapRequest, extractTag } =
-        await import("@sonn-audio/node-upnp");
-      const response = await fetch(cast.control.controlUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "text/xml; charset=utf-8",
-          SOAPAction:
-            '"urn:schemas-upnp-org:service:AVTransport:1#GetPositionInfo"',
-        },
-        body: buildSoapRequest(
-          "urn:schemas-upnp-org:service:AVTransport:1",
-          "GetPositionInfo",
-        ),
-        signal: AbortSignal.timeout(3000),
-      });
-      if (!response.ok) return null;
-      const body = await response.text();
-      const parseTime = (value) => {
-        const parts = value?.split(":").map(Number);
-        return parts?.length === 3 && parts.every(Number.isFinite)
-          ? parts[0] * 3600 + parts[1] * 60 + parts[2]
-          : 0;
-      };
-      const position = parseTime(extractTag(body, "RelTime"));
-      const duration =
-        parseTime(extractTag(body, "TrackDuration")) || cast.duration;
-      progress = { position, duration };
-    }
-    if (currentCast !== cast || !progress) return null;
+    // node-upnp 暂无读取进度的方法，向它已发现的 AVTransport 地址查询。
+    const { buildSoapRequest, extractTag } =
+      await import("@sonn-audio/node-upnp");
+    const response = await fetch(cast.control.controlUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "text/xml; charset=utf-8",
+        SOAPAction:
+          '"urn:schemas-upnp-org:service:AVTransport:1#GetPositionInfo"',
+      },
+      body: buildSoapRequest(
+        "urn:schemas-upnp-org:service:AVTransport:1",
+        "GetPositionInfo",
+      ),
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!response.ok) return null;
+    const body = await response.text();
+    const parseTime = (value) => {
+      const parts = value?.split(":").map(Number);
+      return parts?.length === 3 && parts.every(Number.isFinite)
+        ? parts[0] * 3600 + parts[1] * 60 + parts[2]
+        : 0;
+    };
+    const position = parseTime(extractTag(body, "RelTime"));
+    const duration =
+      parseTime(extractTag(body, "TrackDuration")) || cast.duration;
+    const progress = { position, duration };
+    if (currentCast !== cast) return null;
     return { deviceId: cast.device.id, url: cast.url, ...progress };
   } catch {
     // 某些电视不会回复进度查询；播放与自动换集仍照常进行。

@@ -1,2 +1,0 @@
-pyatv==0.18.0
-pyinstaller==6.16.0
