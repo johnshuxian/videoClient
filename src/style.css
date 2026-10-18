@@ -1195,6 +1195,12 @@ a {
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
+.platform-android .page-scroll,
+.platform-android .detail-scroll,
+.platform-android .settings-body {
+  /* 安卓各页面左右对称预留滚动条空间，避免内容被右侧滚动条挤偏。 */
+  scrollbar-gutter: stable both-edges;
+}
 /* 各滚动区域使用相同的窄滚动条，避免设置面板出现系统默认样式。 */
 .page-scroll::-webkit-scrollbar,
 .detail-scroll::-webkit-scrollbar,
@@ -2948,7 +2954,6 @@ body.player-web-fullscreen .app-shell {
   }
   .platform-android .page-scroll {
     padding-bottom: calc(62px + env(safe-area-inset-bottom));
-    scrollbar-gutter: auto;
   }
   .platform-android .content {
     padding: 10px 12px 28px;
