@@ -44,6 +44,8 @@ export type AppStatusBar = {
   getBrightness(): Promise<{ brightness: number }>;
   setBrightness(options: { brightness: number }): Promise<void>;
   resetBrightness(): Promise<void>;
+  getSystemVolume?(): Promise<{ volume: number }>;
+  setSystemVolume?(options: { volume: number }): Promise<void>;
 };
 
 export type MobileServices = {
@@ -549,6 +551,18 @@ export async function createMobileVideoAPI(
         .resetBrightness()
         .catch((error) => console.error("播放亮度恢复失败", error));
     },
+    // 仅平台提供系统媒体音量接口时启用，避免把播放器音量当成系统音量。
+    ...(statusBar.getSystemVolume && statusBar.setSystemVolume
+      ? {
+          getVideoSystemVolume: async () =>
+            (await statusBar.getSystemVolume!()).volume,
+          setVideoSystemVolume: (volume: number) => {
+            void statusBar
+              .setSystemVolume!({ volume })
+              .catch((error) => console.error("播放系统音量调整失败", error));
+          },
+        }
+      : {}),
     minimize: () => undefined,
     maximize: () => undefined,
     close: () => undefined,

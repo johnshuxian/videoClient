@@ -220,11 +220,18 @@ function enableMobilePlaybackGestures(art: Artplayer) {
   let originalPlaybackRate = 1;
   let wasPaused = false;
   let holdActive = false;
+  let seekGestureActive = false;
+  let adjustAllowed = true;
   let adjustMode: "brightness" | "volume" | null = null;
   let adjustStart = 0;
   let adjustValue = 0;
   let brightness = 0.5;
   let lastBrightnessSent = 0;
+  let systemVolume = 0.5;
+  let lastSystemVolumeSent = 0;
+  const canAdjustSystemVolume = Boolean(
+    window.videoAPI.getVideoSystemVolume && window.videoAPI.setVideoSystemVolume,
+  );
   let suppressClick = false;
 
   const readBrightness = () => {
@@ -232,10 +239,18 @@ function enableMobilePlaybackGestures(art: Artplayer) {
       if (!adjustMode) brightness = value;
     }).catch(() => {});
   };
+  const readSystemVolume = (pointer?: number) => {
+    void window.videoAPI.getVideoSystemVolume?.().then((value) => {
+      if (adjustMode === "volume" || (pointer !== undefined && pointerId !== pointer))
+        return;
+      systemVolume = value;
+    }).catch(() => {});
+  };
   const onFullscreenWeb = (fullscreen: boolean) => {
-    if (fullscreen) readBrightness();
-    else {
-      adjustMode = null;
+    if (fullscreen) {
+      readBrightness();
+      readSystemVolume();
+    } else {
       stopGesture(false);
       window.videoAPI.resetVideoBrightness?.();
     }
@@ -255,7 +270,11 @@ function enableMobilePlaybackGestures(art: Artplayer) {
     window.clearInterval(previewTimer);
     if (adjustMode === "brightness")
       window.videoAPI.setVideoBrightness?.(adjustValue);
-    else if (adjustMode === "volume") art.volume = adjustValue;
+    else if (adjustMode === "volume") {
+      if (canAdjustSystemVolume)
+        window.videoAPI.setVideoSystemVolume?.(adjustValue);
+      else art.volume = adjustValue;
+    }
     if (holdActive) {
       if (direction > 0) {
         art.video.playbackRate = originalPlaybackRate;
@@ -270,6 +289,7 @@ function enableMobilePlaybackGestures(art: Artplayer) {
     holdTimer = undefined;
     previewTimer = undefined;
     holdActive = false;
+    seekGestureActive = false;
     adjustMode = null;
     pointerId = null;
   };
@@ -296,13 +316,17 @@ function enableMobilePlaybackGestures(art: Artplayer) {
     const fraction = gestureRotated
       ? (event.clientY - rect.top) / rect.height
       : (event.clientX - rect.left) / rect.width;
-    // 中间保留给播放器原有的播放、暂停点击区域。
-    if (fraction >= 0.4 && fraction <= 0.6) return;
+    // 中间点击仍交给播放器播放/暂停，但允许从这里开始横向 seek。
+    const centerTouch = fraction >= 0.4 && fraction <= 0.6;
     pointerId = event.pointerId;
     pressX = event.clientX;
     pressY = event.clientY;
+    seekStartPosition = art.video.currentTime;
     direction = fraction < 0.4 ? -1 : 1;
-    if (canSeek) holdTimer = window.setTimeout(() => {
+    adjustAllowed = !centerTouch;
+    if (canAdjustSystemVolume && adjustAllowed)
+      readSystemVolume(event.pointerId);
+    if (canSeek && adjustAllowed) holdTimer = window.setTimeout(() => {
       if (pointerId !== event.pointerId) return;
       holdActive = true;
       wasPaused = art.video.paused;
@@ -333,7 +357,45 @@ function enableMobilePlaybackGestures(art: Artplayer) {
     if (event.pointerId !== pointerId || holdActive) return;
     const deltaX = gestureRotated ? event.clientY - pressY : event.clientX - pressX;
     const deltaY = gestureRotated ? pressX - event.clientX : event.clientY - pressY;
+    const rect = player.getBoundingClientRect();
+    const seekAxisLength = Math.max(1, gestureRotated ? rect.height : rect.width);
+    const horizontalIntent =
+      Math.abs(deltaX) > 12 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2;
+    if (horizontalIntent) {
+      // 一旦识别出横向拖动，就取消长按计时，避免慢速滑动误触发 2×。
+      window.clearTimeout(holdTimer);
+      holdTimer = undefined;
+    }
     if (
+      !adjustMode &&
+      !seekGestureActive &&
+      Number.isFinite(art.video.duration) &&
+      art.video.duration > 0.1 &&
+      horizontalIntent &&
+      Math.abs(deltaX) > Math.max(32, seekAxisLength * 0.04)
+    ) {
+      seekGestureActive = true;
+      hint.classList.remove("rewind");
+      hint.classList.add("adjust", "active");
+    }
+    if (seekGestureActive) {
+      const deadZone = Math.max(32, seekAxisLength * 0.04);
+      const seekDistance =
+        Math.sign(deltaX) * Math.max(0, Math.abs(deltaX) - deadZone);
+      // 越过死区后按播放器宽度预览进度，松手时只执行一次 seek。
+      const seekDelta = (seekDistance / seekAxisLength) * art.video.duration * 0.5;
+      previewPosition = Math.max(
+        0,
+        Math.min(art.video.duration, seekStartPosition + seekDelta),
+      );
+      const skipped = Math.round(Math.abs(previewPosition - seekStartPosition));
+      hint.textContent = `${deltaX > 0 ? "快进" : "快退"} ${Math.floor(skipped / 60)}:${String(skipped % 60).padStart(2, "0")}`;
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    if (
+      adjustAllowed &&
       !adjustMode &&
       (art.fullscreenWeb || art.fullscreen) &&
       Math.abs(deltaY) > 18 &&
@@ -341,12 +403,13 @@ function enableMobilePlaybackGestures(art: Artplayer) {
     ) {
       window.clearTimeout(holdTimer);
       adjustMode = direction < 0 ? "brightness" : "volume";
-      adjustStart = adjustMode === "brightness" ? brightness : art.volume;
+      adjustStart = adjustMode === "brightness"
+        ? brightness
+        : (canAdjustSystemVolume ? systemVolume : art.volume);
       hint.classList.remove("rewind");
       hint.classList.add("adjust", "active");
     }
     if (adjustMode) {
-      const rect = player.getBoundingClientRect();
       const height = gestureRotated ? rect.width : rect.height;
       adjustValue = Math.max(
         adjustMode === "brightness" ? 0.05 : 0,
@@ -358,6 +421,12 @@ function enableMobilePlaybackGestures(art: Artplayer) {
           window.videoAPI.setVideoBrightness?.(adjustValue);
           lastBrightnessSent = performance.now();
         }
+      } else if (canAdjustSystemVolume) {
+        systemVolume = adjustValue;
+        if (performance.now() - lastSystemVolumeSent > 80) {
+          window.videoAPI.setVideoSystemVolume?.(adjustValue);
+          lastSystemVolumeSent = performance.now();
+        }
       } else {
         art.muted = false;
         art.video.volume = adjustValue;
@@ -367,12 +436,18 @@ function enableMobilePlaybackGestures(art: Artplayer) {
       event.stopPropagation();
       return;
     }
-    if (Math.hypot(deltaX, deltaY) > 24)
-      stopGesture(false);
+    if (Math.hypot(deltaX, deltaY) > 24) {
+      // 先停止长按识别，继续跟踪手指以判断这是横滑还是其他移动。
+      window.clearTimeout(holdTimer);
+      holdTimer = undefined;
+    }
   };
   const onPointerEnd = (event: PointerEvent) => {
     if (event.pointerId !== pointerId) return;
-    if (holdActive || adjustMode) {
+    const handledGesture = holdActive || adjustMode !== null || seekGestureActive;
+    if (seekGestureActive && Math.abs(previewPosition - seekStartPosition) > 0.5)
+      art.video.currentTime = previewPosition;
+    if (handledGesture) {
       // 长按结束后的合成点击不能再触发 Artplayer 的播放/暂停。
       event.preventDefault();
       event.stopPropagation();
@@ -384,7 +459,7 @@ function enableMobilePlaybackGestures(art: Artplayer) {
   };
   const onTouchEnd = (event: TouchEvent) => {
     if (
-      (!holdActive && !adjustMode && !suppressClick) ||
+      (!holdActive && !adjustMode && !seekGestureActive && !suppressClick) ||
       !player.contains(event.target as Node)
     )
       return;
@@ -604,6 +679,8 @@ function Player({
           theme: "#37c5e2",
           autoplay: true,
           playsInline: true,
+          // 左右滑动由本地手势处理并带死区，避免 ArtPlayer 默认无阈值 seek。
+          gesture: window.videoAPI.platform !== "android",
           setting: true,
           playbackRate: true,
           pip: true,

@@ -1587,6 +1587,10 @@ html[data-harmony="true"] .art-video-player.art-fullscreen-web .art-bottom {
 .art-video-player.art-fullscreen-web {
   touch-action: none;
 }
+/* 播放器横向拖动用于 seek，非全屏时仍允许竖向滚动页面。 */
+.platform-android .art-video-player:not(.art-fullscreen-web) {
+  touch-action: pan-y;
+}
 .casting-screen {
   display: flex;
   flex-direction: column;

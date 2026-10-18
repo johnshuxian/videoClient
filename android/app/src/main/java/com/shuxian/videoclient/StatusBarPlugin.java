@@ -1,6 +1,7 @@
 package com.shuxian.videoclient;
 
 import android.app.Activity;
+import android.media.AudioManager;
 import android.content.Context;
 import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
@@ -118,6 +119,31 @@ public class StatusBarPlugin extends Plugin {
             getActivity().getWindow().setAttributes(attributes);
             call.resolve();
         });
+    }
+
+    @PluginMethod
+    public void getSystemVolume(PluginCall call) {
+        AudioManager audio = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
+        int min = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+            ? audio.getStreamMinVolume(AudioManager.STREAM_MUSIC) : 0;
+        int max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+        int current = audio.getStreamVolume(AudioManager.STREAM_MUSIC);
+        JSObject result = new JSObject();
+        result.put("volume", max == min ? 0 : (current - min) / (double) (max - min));
+        call.resolve(result);
+    }
+
+    @PluginMethod
+    public void setSystemVolume(PluginCall call) {
+        float volume = Math.max(0f, Math.min(1f, call.getFloat("volume", 0.5f)));
+        AudioManager audio = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
+        int min = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+            ? audio.getStreamMinVolume(AudioManager.STREAM_MUSIC) : 0;
+        int max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+        int level = min + Math.round(volume * (max - min));
+        // 手势调整视频播放对应的系统媒体音量，不改变网页播放器自己的音量。
+        audio.setStreamVolume(AudioManager.STREAM_MUSIC, level, 0);
+        call.resolve();
     }
 
     @Override

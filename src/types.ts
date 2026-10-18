@@ -124,6 +124,8 @@ declare global {
       getVideoBrightness?: () => Promise<number>;
       setVideoBrightness?: (brightness: number) => void;
       resetVideoBrightness?: () => void;
+      getVideoSystemVolume?: () => Promise<number>;
+      setVideoSystemVolume?: (volume: number) => void;
       minimize: () => void;
       maximize: () => void;
       close: () => void;
