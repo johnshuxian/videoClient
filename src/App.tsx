@@ -690,6 +690,13 @@ function Player({
         });
         artRef.current = art;
         playerInstance.current = art;
+        // ArtPlayer 默认会弹出播放/暂停状态文字；清除这两类提示，保留其他提示。
+        art.on("play", () => {
+          art.notice.show = "";
+        });
+        art.on("pause", () => {
+          art.notice.show = "";
+        });
         const fullscreenTitle = document.createElement("div");
         fullscreenTitle.className = "player-fullscreen-title";
         fullscreenTitle.textContent = titleTextRef.current;
