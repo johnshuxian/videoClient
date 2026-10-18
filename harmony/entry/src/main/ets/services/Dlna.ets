@@ -126,7 +126,8 @@ export class Dlna {
     return undefined;
   }
 
-  async cast(deviceId: string, stream: string, original: string, title: string, isHls: boolean): Promise<void> {
+  async cast(deviceId: string, stream: string, original: string, title: string, isHls: boolean,
+    startPosition: number = 0): Promise<void> {
     const renderer = this.renderers.get(deviceId);
     if (!renderer) throw new Error('电视已失效，请重新搜索');
     try {
@@ -138,6 +139,22 @@ export class Dlna {
     const didl = `<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/"><item id="0" parentID="-1" restricted="1"><dc:title>${xml(title)}</dc:title><upnp:class>object.item.videoItem</upnp:class><res protocolInfo="http-get:*:${mime}:*">${xml(stream)}</res></item></DIDL-Lite>`;
     await this.soap(renderer, 'SetAVTransportURI', `<CurrentURI>${xml(stream)}</CurrentURI><CurrentURIMetaData>${xml(didl)}</CurrentURIMetaData>`);
     await this.soap(renderer, 'Play', '<Speed>1</Speed>');
+    if (startPosition > 0) {
+      // 一些电视会在 Play 时重置此前的 Seek；等电视进入播放状态后再跳转。
+      const totalSeconds = Math.floor(startPosition);
+      const target = `${Math.floor(totalSeconds / 3600).toString().padStart(2, '0')}:${Math.floor(totalSeconds % 3600 / 60).toString().padStart(2, '0')}:${(totalSeconds % 60).toString().padStart(2, '0')}`;
+      for (let attempt = 0; attempt < 10; attempt++) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 500));
+        try {
+          if (field(await this.soap(renderer, 'GetTransportInfo', ''), 'CurrentTransportState') === 'PLAYING') break;
+        } catch {
+          // 不支持状态查询的电视仍可直接接收 Seek。
+          break;
+        }
+      }
+      // TCL 等电视会正常跳转，但 GetPositionInfo 短时间内仍返回 0；以 Seek 的执行结果为准。
+      await this.soap(renderer, 'Seek', `<Unit>REL_TIME</Unit><Target>${target}</Target>`);
+    }
     this.current = renderer;
     this.currentUrl = original;
     this.seenPlaying = false;

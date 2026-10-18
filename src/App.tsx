@@ -137,16 +137,41 @@ function PosterImage({
   loading?: "lazy" | "eager";
 }) {
   const url = useProxyImage(src);
-  return url ? (
+  const [failure, setFailure] = useState({ url: "", attempt: 0, retryAt: 0 });
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (retryTimer.current) clearTimeout(retryTimer.current);
+    };
+  }, [url]);
+  const attempt = failure.url === url ? failure.attempt : 0;
+  // 代理首次失败时换一个地址重试，绕开 ArkWeb 对失败请求的缓存。
+  const image =
+    attempt === 1
+      ? `${url}${url.includes("?") ? "&" : "?"}retry=${failure.retryAt}`
+      : attempt === 2
+        ? src
+        : url;
+  return url && attempt < 3 ? (
     <img
-      src={url}
+      src={image}
       alt={alt}
       loading={loading}
+      onLoad={(event) => {
+        event.currentTarget.style.visibility = "visible";
+      }}
       onError={(event) => {
-        // 部分图床拒绝代理的请求，回退到 WebView 直接读取。
-        if (url !== src) {
-          event.currentTarget.onerror = null;
-          event.currentTarget.src = src;
+        // 重试期间保留卡片背景占位，避免显示浏览器的损坏图片图标。
+        event.currentTarget.style.visibility = "hidden";
+        if (url === src || attempt === 2) {
+          setFailure({ url, attempt: 3, retryAt: 0 });
+        } else if (attempt === 0) {
+          retryTimer.current = setTimeout(() => {
+            setFailure({ url, attempt: 1, retryAt: Date.now() });
+          }, 180);
+        } else {
+          // 代理重试仍失败时，再尝试 WebView 直连原图。
+          setFailure({ url, attempt: 2, retryAt: 0 });
         }
       }}
     />
@@ -160,18 +185,9 @@ function HeroPoster({
   item: CatalogItem;
   ratingSource: string;
 }) {
-  const image = useProxyImage(item.poster);
   return (
-    <div
-      className="hero-poster"
-      style={
-        image
-          ? {
-              backgroundImage: `linear-gradient(90deg,#111b2b 0%,transparent 45%),url("${image}")`,
-            }
-          : undefined
-      }
-    >
+    <div className="hero-poster">
+      <PosterImage src={item.poster} loading="eager" />
       <div className="hero-poster-label">
         <span>今日推荐</span>
         <strong>{item.title}</strong>
@@ -193,6 +209,7 @@ function enableMobilePlaybackGestures(art: Artplayer) {
   let pointerId: number | null = null;
   let pressX = 0;
   let pressY = 0;
+  let gestureRotated = false;
   let direction: -1 | 1 = 1;
   let holdTimer: number | undefined;
   let previewTimer: number | undefined;
@@ -274,7 +291,11 @@ function enableMobilePlaybackGestures(art: Artplayer) {
     const canSeek = Number.isFinite(duration) && duration > 0.1;
     if (!canSeek && !art.fullscreenWeb && !art.fullscreen) return;
     const rect = player.getBoundingClientRect();
-    const fraction = (event.clientX - rect.left) / rect.width;
+    gestureRotated = art.isRotate;
+    // 播放器单独旋转后，屏幕纵轴才是播放器的左右方向。
+    const fraction = gestureRotated
+      ? (event.clientY - rect.top) / rect.height
+      : (event.clientX - rect.left) / rect.width;
     // 中间保留给播放器原有的播放、暂停点击区域。
     if (fraction >= 0.4 && fraction <= 0.6) return;
     pointerId = event.pointerId;
@@ -310,8 +331,8 @@ function enableMobilePlaybackGestures(art: Artplayer) {
   };
   const onPointerMove = (event: PointerEvent) => {
     if (event.pointerId !== pointerId || holdActive) return;
-    const deltaX = event.clientX - pressX;
-    const deltaY = event.clientY - pressY;
+    const deltaX = gestureRotated ? event.clientY - pressY : event.clientX - pressX;
+    const deltaY = gestureRotated ? pressX - event.clientX : event.clientY - pressY;
     if (
       !adjustMode &&
       (art.fullscreenWeb || art.fullscreen) &&
@@ -325,7 +346,8 @@ function enableMobilePlaybackGestures(art: Artplayer) {
       hint.classList.add("adjust", "active");
     }
     if (adjustMode) {
-      const height = player.getBoundingClientRect().height;
+      const rect = player.getBoundingClientRect();
+      const height = gestureRotated ? rect.width : rect.height;
       adjustValue = Math.max(
         adjustMode === "brightness" ? 0.05 : 0,
         Math.min(1, adjustStart - (deltaY / height) * 1.5),
@@ -629,6 +651,11 @@ function Player({
         }
         if (window.videoAPI.platform === "android") {
           art.on("fullscreenWeb", (fullscreen) => {
+            // ArtPlayer 已把播放器移到 body；页面保持原方向，播放器自己横向铺满。
+            document.body.classList.toggle("player-web-fullscreen", fullscreen);
+            // ArtPlayer 的进度条和触摸滑动依赖此运行时标记来交换横纵坐标。
+            (art as unknown as { isRotate: boolean }).isRotate =
+              fullscreen && window.matchMedia("(orientation: portrait)").matches;
             window.videoAPI.setVideoFullscreen(fullscreen);
           });
           if (!document.body.classList.contains("tv-body"))
@@ -642,7 +669,8 @@ function Player({
             art.currentTime = position;
         });
         art.on("video:timeupdate", () => {
-          onProgressRef.current(art.currentTime, art.duration || 0);
+          if (sourceRef.current?.loaded && art.currentTime > 1)
+            onProgressRef.current(art.currentTime, art.duration || 0);
         });
         art.on("video:canplay", () => {
           const current = sourceRef.current;
@@ -762,12 +790,13 @@ export default function App() {
       window.videoAPI.platform === "android" ? "dark" : "light",
     ),
   );
-  const [filterAds, setFilterAds] = useState(readStorage("filter-ads", true));
+  const filterAds = true;
   const [autoplay, setAutoplay] = useState(readStorage("autoplay", true));
   const [history, setHistory] = useState<HistoryItem[]>(
     readStorage("history", []),
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsClosing, setSettingsClosing] = useState(false);
   const [sourceFormatOpen, setSourceFormatOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [recentSearches, setRecentSearches] = useState<string[]>(() =>
@@ -781,11 +810,15 @@ export default function App() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchProgress, setSearchProgress] = useState(0);
   const [selected, setSelected] = useState<SearchItem | null>(null);
+  const [detailClosing, setDetailClosing] = useState(false);
   const [detail, setDetail] = useState<VodDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
   const [line, setLine] = useState(0);
   const [episode, setEpisode] = useState<number | null>(null);
+  const [episodeOrder, setEpisodeOrder] = useState<"ascending" | "descending">(
+    "ascending",
+  );
   const [devices, setDevices] = useState<Device[]>(readStorage("devices", []));
   const [castOpen, setCastOpen] = useState(false);
   const [castBusy, setCastBusy] = useState(false);
@@ -803,7 +836,17 @@ export default function App() {
   const restoreScroll = useRef<number | null>(null);
   const testSerial = useRef(0);
   const detailSerial = useRef(0);
+  const detailCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const settingsCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const progressSaved = useRef(0);
+  const progressIdentity = useRef("");
+  const castClock = useRef<{
+    deviceId: string;
+    url: string;
+    position: number;
+    at: number;
+    duration: number;
+  } | null>(null);
   const pageScroll = useRef<HTMLDivElement>(null);
   const detailScroll = useRef<HTMLDivElement>(null);
   const searchBox = useRef<HTMLDivElement>(null);
@@ -816,6 +859,55 @@ export default function App() {
   const customCategoryCache = useRef(new Map<string, SourceCategory[]>());
   const loadedCustomCatalog = useRef("");
   const casting = castingDevice?.name || "";
+
+  // 窄屏退出动画期间保留页面；其余设备和减少动态效果设置立即返回。
+  const animatePageExit = () =>
+    !isTv &&
+    window.videoAPI.platform === "android" &&
+    window.matchMedia(
+      "(max-width: 700px) and (prefers-reduced-motion: no-preference)",
+    ).matches;
+
+  function closeSettings() {
+    if (settingsClosing) return;
+    if (!animatePageExit()) {
+      setSettingsOpen(false);
+      return;
+    }
+    setSettingsClosing(true);
+    settingsCloseTimer.current = setTimeout(() => {
+      setSettingsOpen(false);
+      setSettingsClosing(false);
+      settingsCloseTimer.current = null;
+    }, 260);
+  }
+
+  function closeDetail() {
+    if (detailClosing) return;
+    ++detailSerial.current;
+    if (castingDevice)
+      void saveCastProgress().finally(() => window.videoAPI.castStop().catch(() => {}));
+    setCastingDevice(null);
+    if (!animatePageExit()) {
+      setSelected(null);
+      setDetail(null);
+      setEpisode(null);
+      return;
+    }
+    setDetailClosing(true);
+    detailCloseTimer.current = setTimeout(() => {
+      setSelected(null);
+      setDetail(null);
+      setEpisode(null);
+      setDetailClosing(false);
+      detailCloseTimer.current = null;
+    }, 260);
+  }
+
+  useEffect(() => () => {
+    if (detailCloseTimer.current) clearTimeout(detailCloseTimer.current);
+    if (settingsCloseTimer.current) clearTimeout(settingsCloseTimer.current);
+  }, []);
   const enabledSources = sources.filter(
     (source) => enabled.includes(source.url) && !source.isAdult,
   );
@@ -868,24 +960,19 @@ export default function App() {
         playerInstance.current.fullscreenWeb = false;
       else if (sourceFormatOpen) setSourceFormatOpen(false);
       else if (castOpen) setCastOpen(false);
-      else if (settingsOpen) setSettingsOpen(false);
+      else if (settingsOpen) closeSettings();
       else if (showRecentSearches) setShowRecentSearches(false);
       else if (customSourceOpen) setCustomSourceOpen(false);
-      else if (selected) {
-        ++detailSerial.current;
-        if (castingDevice) window.videoAPI.castStop().catch(() => {});
-        setCastingDevice(null);
-        setSelected(null);
-        setDetail(null);
-        setEpisode(null);
-      } else if (section === "search") {
+      else if (selected) closeDetail();
+      else if (section === "search") {
         ++searchSerial.current;
         setSearchLoading(false);
         restoreScroll.current = searchOrigin.current.scrollTop;
         setSection(searchOrigin.current.section);
       } else if (section !== "home") setSection("home");
-      else if (document.documentElement.dataset.harmony !== "true")
-        CapacitorApp.exitApp();
+      else if (document.documentElement.dataset.harmony === "true")
+        window.videoAPI.close();
+      else void CapacitorApp.exitApp();
     };
     if (document.documentElement.dataset.harmony === "true") {
       window.addEventListener("harmony-back", goBack);
@@ -920,10 +1007,15 @@ export default function App() {
     sourceFormatOpen,
     castOpen,
     settingsOpen,
+    settingsClosing,
     showRecentSearches,
     customSourceOpen,
     castingDevice,
     selected,
+    detailClosing,
+    detail,
+    line,
+    episode,
     section,
   ]);
 
@@ -1272,6 +1364,7 @@ export default function App() {
     () =>
       window.videoAPI.onCastEnded(async ({ deviceId, error }) => {
         if (!castingDevice || castingDevice.id !== deviceId) return;
+        await saveCastProgress();
         if (error) {
           setCastError(`电视播放中断：${error}`);
           setCastingDevice(null);
@@ -1294,8 +1387,16 @@ export default function App() {
             next.url,
             `${detail.title} · ${next.label}`,
             filterAds,
+            0,
           );
           if (!ok) throw new Error("电视未接受下一集播放请求");
+          castClock.current = {
+            deviceId: castingDevice.id,
+            url: next.url,
+            position: 0,
+            at: Date.now(),
+            duration: 0,
+          };
         } catch (castError) {
           setCastError(`自动换集投屏失败：${(castError as Error).message}`);
           setCastingDevice(null);
@@ -1317,12 +1418,9 @@ export default function App() {
       polling = true;
       try {
         const progress = await window.videoAPI.castProgress().catch(() => null);
-        if (
-          active &&
-          progress?.deviceId === castingDevice.id &&
-          progress.url === currentUrl
-        )
-          recordProgress(progress.position, progress.duration);
+        if (!active) return;
+        const current = updateCastProgress(castingDevice.id, currentUrl, progress);
+        if (current) recordProgress(current.position, current.duration);
       } finally {
         polling = false;
       }
@@ -1496,9 +1594,13 @@ export default function App() {
   }
 
   async function openDetail(item: SearchItem, resumeItem?: HistoryItem) {
+    if (detailCloseTimer.current) clearTimeout(detailCloseTimer.current);
+    detailCloseTimer.current = null;
+    setDetailClosing(false);
     const serial = ++detailSerial.current;
     failedLines.current.clear();
     fallbackPosition.current = null;
+    setEpisodeOrder("ascending");
     const cachedDetail = resumeItem?.detail;
     const canResume = Boolean(
       cachedDetail?.lines[resumeItem?.line ?? 0]?.episodes[
@@ -1511,7 +1613,8 @@ export default function App() {
     setDetailError("");
     setDetailLoading(!canResume);
     setCastOpen(false);
-    if (castingDevice) window.videoAPI.castStop().catch(() => {});
+    if (castingDevice)
+      void saveCastProgress().finally(() => window.videoAPI.castStop().catch(() => {}));
     setCastingDevice(null);
     setLine(resumeItem?.line || 0);
     setEpisode(resumeItem ? resumeItem.episode : null);
@@ -1602,14 +1705,46 @@ export default function App() {
     setCatalogHasMore(true);
   }
 
-  function recordProgress(position: number, duration: number) {
-    if (
-      !selected ||
-      episode === null ||
+  function updateCastProgress(
+    deviceId: string,
+    url: string,
+    reported: Awaited<ReturnType<typeof window.videoAPI.castProgress>>,
+  ) {
+    const clock = castClock.current;
+    if (!clock || clock.deviceId !== deviceId || clock.url !== url) return null;
+    const now = Date.now();
+    // 部分电视不报告时间或只报告 0；正常播放时从上次可信位置推算。
+    const estimated = clock.position + Math.max(0, now - clock.at) / 1000;
+    const matches = reported?.deviceId === deviceId && reported.url === url;
+    const position = matches && reported.position > 1 && reported.position >= clock.position - 15
+      ? reported.position
+      : estimated;
+    const duration = matches && reported.duration > 0 ? reported.duration : clock.duration;
+    castClock.current = { ...clock, position, duration, at: now };
+    return { position, duration };
+  }
+
+  async function saveCastProgress() {
+    const url = episode === null ? null : detail?.lines[line]?.episodes[episode]?.url;
+    if (!castingDevice || !url) return null;
+    const reported = await window.videoAPI.castProgress().catch(() => null);
+    const current = updateCastProgress(castingDevice.id, url, reported);
+    if (current) recordProgress(current.position, current.duration, true);
+    return current;
+  }
+
+  function recordProgress(position: number, duration: number, force = false) {
+    if (!selected || episode === null || position <= 1) return;
+    const identity = `${selected.sourceUrl}:${selected.id}:${line}:${episode}`;
+    if (identity !== progressIdentity.current) {
+      progressIdentity.current = identity;
+      // 新集的第一条进度不应被上一集的保存间隔挡住。
+      progressSaved.current = 0;
+    }
+    if (!force &&
       Date.now() - progressSaved.current <
-        (window.videoAPI.platform === "android" ? 15000 : 4000)
-    )
-      return;
+      (window.videoAPI.platform === "android" ? 15000 : 4000)
+    ) return;
     progressSaved.current = Date.now();
     const item: HistoryItem = {
       key: `${selected.sourceUrl}:${selected.id}`,
@@ -1664,9 +1799,36 @@ export default function App() {
     }
   }
 
+  async function castEpisode(device: Device, episodeIndex: number) {
+    const current = detail?.lines[line]?.episodes[episodeIndex];
+    if (!current || !detail) throw new Error("当前集数不可播放");
+    const startPosition = castStartPosition(episodeIndex);
+    const ok = await window.videoAPI.cast(
+      device,
+      current.url,
+      `${detail.title} · ${current.label}`,
+      filterAds,
+      startPosition,
+    );
+    if (!ok) throw new Error("电视未接受播放请求");
+    // 投屏开始后的第一条电视进度不要受本机播放的保存间隔影响。
+    progressSaved.current = 0;
+    const playerDuration = episodeIndex === episode ? playerInstance.current?.duration || 0 : 0;
+    castClock.current = {
+      deviceId: device.id,
+      url: current.url,
+      position: device.type === "airplay" ? 0 : startPosition,
+      at: Date.now(),
+      duration: Number.isFinite(playerDuration) && playerDuration > 0
+        ? playerDuration
+        : selectedHistory?.line === line && selectedHistory.episode === episodeIndex
+          ? selectedHistory.duration
+          : 0,
+    };
+    return startPosition;
+  }
+
   async function castTo(device: Device) {
-    const current = detail?.lines[line].episodes[episode || 0];
-    if (!current || !detail) return;
     setCastBusy(true);
     setCastError("");
     try {
@@ -1676,18 +1838,50 @@ export default function App() {
         await window.videoAPI.airplayPairBegin(device.id);
         return;
       }
-      const ok = await window.videoAPI.cast(
-        device,
-        current.url,
-        `${detail.title} · ${current.label}`,
-        filterAds,
-      );
-      if (!ok) throw new Error("电视未接受播放请求");
+      const startPosition = await castEpisode(device, episode ?? 0);
       setCastingDevice(device);
       setCastOpen(false);
+      if (device.type === "airplay" && startPosition > 0)
+        setCastError("AirPlay 当前不支持从续播进度开始，已从头投放。");
     } catch (error) {
       if (device.type === "airplay") setPairingDevice(null);
       setCastError(`投屏失败：${(error as Error).message}`);
+    } finally {
+      setCastBusy(false);
+    }
+  }
+
+  function castStartPosition(episodeIndex: number) {
+    const livePosition =
+      episodeIndex === episode ? playerInstance.current?.currentTime || 0 : 0;
+    if (livePosition > 0) return livePosition;
+    return selectedHistory?.line === line &&
+      selectedHistory.episode === episodeIndex &&
+      selectedHistory.position > 5 &&
+      (!selectedHistory.duration ||
+        selectedHistory.position < selectedHistory.duration - 15)
+      ? selectedHistory.position
+      : 0;
+  }
+
+  async function selectEpisode(index: number) {
+    if (castingDevice && index === episode) return;
+    failedLines.current.clear();
+    fallbackPosition.current = null;
+    setEpisode(index);
+    setPlaybackSerial((current) => current + 1);
+    // 选集面板可能在长页面底部，切换后直接露出播放器。
+    detailScroll.current?.scrollTo(0, 0);
+    if (!castingDevice) return;
+    setCastBusy(true);
+    setCastError("");
+    try {
+      const startPosition = await castEpisode(castingDevice, index);
+      if (castingDevice.type === "airplay" && startPosition > 0)
+        setCastError("AirPlay 当前不支持从续播进度开始，已从头投放。");
+    } catch (error) {
+      setCastError(`切换集数投屏失败：${(error as Error).message}`);
+      setCastingDevice(null);
     } finally {
       setCastBusy(false);
     }
@@ -1719,7 +1913,10 @@ export default function App() {
     setCastBusy(true);
     setCastError("");
     try {
+      const current = await saveCastProgress();
       await window.videoAPI.castStop();
+      fallbackPosition.current = current?.position ?? null;
+      castClock.current = null;
       setCastingDevice(null);
     } catch (error) {
       setCastError(`停止投屏失败：${(error as Error).message}`);
@@ -1741,6 +1938,9 @@ export default function App() {
   const hasLongEpisodeLabels = detail?.lines[line]?.episodes.some(
     (item) => item.label.length > 5,
   );
+  const displayedEpisodes =
+    detail?.lines[line]?.episodes.map((item, index) => ({ item, index })) ?? [];
+  if (episodeOrder === "descending") displayedEpisodes.reverse();
   const selectedHistory = selected
     ? history.find(
         (item) => item.key === `${selected.sourceUrl}:${selected.id}`,
@@ -1817,12 +2017,6 @@ export default function App() {
           onClick={() => changeType("tv")}
         >
           <Tv size={19} /> 电视剧
-        </button>
-        <button
-          className={`nav-item mobile-category-nav ${section === "home" && type === "anime" ? "active" : ""}`}
-          onClick={() => changeType("anime")}
-        >
-          <Sparkles size={19} /> 番剧
         </button>
         <button
           className={`nav-item mobile-category-nav ${section === "home" && type === "variety" ? "active" : ""}`}
@@ -1907,7 +2101,7 @@ export default function App() {
                       ?.focus();
                   }
                 }}
-                placeholder="搜索电影、剧集、番剧、综艺..."
+                placeholder="搜索电影、剧集、综艺..."
                 aria-label="搜索影视作品"
                 aria-expanded={showRecentSearches && recentSearches.length > 0}
                 aria-controls="recent-searches"
@@ -2018,7 +2212,6 @@ export default function App() {
               [
                 ["movie", "电影"],
                 ["tv", "电视剧"],
-                ["anime", "番剧"],
                 ["variety", "综艺"],
               ] as const
             ).map(([value, label]) => (
@@ -2042,9 +2235,7 @@ export default function App() {
                   <div className="hero-copy">
                     <div className="eyebrow">
                       <Sparkles size={14} />{" "}
-                      {type === "anime"
-                        ? "Bangumi 动画 · 分类精选"
-                        : "豆瓣精选 · 每日发现"}
+                      豆瓣精选 · 每日发现
                     </div>
                     <h1>
                       光影之间，
@@ -2052,7 +2243,7 @@ export default function App() {
                       <em>遇见好故事。</em>
                     </h1>
                     <p>
-                      电影、剧集、番剧与综艺，随心探索。想看的，点开就能找。
+                      电影、剧集与综艺，随心探索。想看的，点开就能找。
                     </p>
                     <button
                       className="hero-button"
@@ -2066,7 +2257,7 @@ export default function App() {
                   {featured && (
                     <HeroPoster
                       item={featured}
-                      ratingSource={type === "anime" ? "Bangumi" : "豆瓣"}
+                      ratingSource="豆瓣"
                     />
                   )}
                 </section>
@@ -2092,12 +2283,6 @@ export default function App() {
                         onClick={() => changeType("tv")}
                       >
                         剧集
-                      </button>
-                      <button
-                        className={type === "anime" ? "selected" : ""}
-                        onClick={() => changeType("anime")}
-                      >
-                        番剧
                       </button>
                       <button
                         className={type === "variety" ? "selected" : ""}
@@ -2707,17 +2892,12 @@ export default function App() {
       </div>
 
       {selected && (
-        <div className="detail-overlay">
+        <div className={`detail-overlay${detailClosing ? " is-closing" : ""}`}>
           {window.videoAPI.platform !== "android" && (
             <div className="detail-toolbar">
               <button
                 onClick={() => {
-                  ++detailSerial.current;
-                  if (castingDevice) window.videoAPI.castStop().catch(() => {});
-                  setCastingDevice(null);
-                  setSelected(null);
-                  setDetail(null);
-                  setEpisode(null);
+                  closeDetail();
                 }}
               >
                 <ArrowLeft size={19} /> 返回列表
@@ -2776,7 +2956,16 @@ export default function App() {
                           onClick={() => {
                             failedLines.current.clear();
                             fallbackPosition.current = null;
-                            setEpisode(0);
+                            // 从搜索结果重进详情时，也要按这部影片的记录选中集数和线路。
+                            const resumeLine = selectedHistory?.line ?? 0;
+                            const resumeEpisode = selectedHistory?.episode ?? 0;
+                            if (detail.lines[resumeLine]?.episodes[resumeEpisode]) {
+                              setLine(resumeLine);
+                              setEpisode(resumeEpisode);
+                            } else {
+                              setLine(0);
+                              setEpisode(0);
+                            }
                             detailScroll.current?.scrollTo(0, 0);
                           }}
                           disabled={!playing}
@@ -2957,9 +3146,35 @@ export default function App() {
                         </div>
                         <div className="panel-title episodes-title">
                           <span>选集播放</span>
-                          <strong>
-                            共 {detail.lines[line].episodes.length} 集
-                          </strong>
+                          <div
+                            className="episode-order-control"
+                            role="group"
+                            aria-label="集数顺序"
+                          >
+                            <strong>
+                              共 {detail.lines[line].episodes.length} 集
+                            </strong>
+                            <button
+                              type="button"
+                              className={
+                                episodeOrder === "ascending" ? "active" : ""
+                              }
+                              aria-pressed={episodeOrder === "ascending"}
+                              onClick={() => setEpisodeOrder("ascending")}
+                            >
+                              正序
+                            </button>
+                            <button
+                              type="button"
+                              className={
+                                episodeOrder === "descending" ? "active" : ""
+                              }
+                              aria-pressed={episodeOrder === "descending"}
+                              onClick={() => setEpisodeOrder("descending")}
+                            >
+                              倒序
+                            </button>
+                          </div>
                         </div>
                         <div
                           className={
@@ -2968,19 +3183,12 @@ export default function App() {
                               : "episode-list"
                           }
                         >
-                          {detail.lines[line].episodes.map((item, index) => (
+                          {displayedEpisodes.map(({ item, index }) => (
                             <button
                               key={`${item.url}-${index}`}
                               className={episode === index ? "active" : ""}
-                              disabled={!!casting}
-                              onClick={() => {
-                                failedLines.current.clear();
-                                fallbackPosition.current = null;
-                                setEpisode(index);
-                                setPlaybackSerial((current) => current + 1);
-                                // 选集面板可能在长页面底部，开始播放后直接露出播放器。
-                                detailScroll.current?.scrollTo(0, 0);
-                              }}
+                              disabled={castBusy}
+                              onClick={() => void selectEpisode(index)}
                               title={item.label}
                             >
                               {item.label}
@@ -2988,9 +3196,7 @@ export default function App() {
                           ))}
                         </div>
                         <div className="panel-tip">
-                          <ShieldCheck size={16} /> 广告过滤
-                          {filterAds ? "已开启" : "已关闭"} · 自动连播
-                          {autoplay ? "已开启" : "已关闭"}
+                          自动连播{autoplay ? "已开启" : "已关闭"}
                         </div>
                       </>
                     )}
@@ -3004,9 +3210,9 @@ export default function App() {
 
       {settingsOpen && (
         <div
-          className="drawer-backdrop"
+          className={`drawer-backdrop${settingsClosing ? " is-closing" : ""}`}
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setSettingsOpen(false);
+            if (event.target === event.currentTarget) closeSettings();
           }}
         >
           <div className="settings-drawer">
@@ -3034,22 +3240,6 @@ export default function App() {
                 </button>
               </div>
               <h3>播放</h3>
-              <label className="setting-row">
-                <div>
-                  <strong>广告过滤</strong>
-                  <p>过滤清单中标记的广告片段</p>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={filterAds}
-                  onChange={(event) => {
-                    failedLines.current.clear();
-                    fallbackPosition.current = null;
-                    setFilterAds(event.target.checked);
-                    saveStorage("filter-ads", event.target.checked);
-                  }}
-                />
-              </label>
               <label className="setting-row">
                 <div>
                   <strong>自动连播</strong>

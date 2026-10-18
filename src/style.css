@@ -469,10 +469,21 @@ a {
 .hero-poster {
   position: absolute;
   inset: 0 0 0 46%;
-  background-size: cover;
-  background-position: center 30%;
   opacity: 0.75;
   mask-image: linear-gradient(90deg, transparent, #000 28%);
+}
+.hero-poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 30%;
+}
+.hero-poster:before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, #111b2b, transparent 45%);
+  pointer-events: none;
 }
 .hero-poster:after {
   content: "";
@@ -1378,6 +1389,28 @@ a {
 .episodes-title {
   padding-top: 19px;
   border-top: 1px solid #2c3d4b;
+}
+.episode-order-control {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.episode-order-control button {
+  padding: 5px 7px;
+  border: 1px solid #314456;
+  border-radius: 5px;
+  background: #1d2c3b;
+  color: #a9beca;
+  font-size: 10px;
+}
+.episode-order-control button:hover {
+  border-color: #2cbcdc;
+  color: #fff;
+}
+.episode-order-control button.active {
+  border-color: #20c1e0;
+  background: #114c61;
+  color: #8cecff;
 }
 .episode-list {
   display: grid;
@@ -2374,6 +2407,20 @@ html[data-harmony="true"] .light .detail-overlay {
 .light .episode-list button {
   color: #4e6d7d;
 }
+.light .episode-order-control button {
+  background: #f2f8fb;
+  border-color: #c9dce5;
+  color: #426477;
+}
+.light .episode-order-control button:hover:not(.active) {
+  border-color: #8db7c8;
+  color: #304656;
+}
+.light .episode-order-control button.active {
+  background: #d9f4fa;
+  border-color: #22b8d8;
+  color: #087f9c;
+}
 .light .type-switch button.selected,
 .light .tag-list button.active {
   background: #304656;
@@ -2647,6 +2694,26 @@ html[data-theme="light"] body.android-body {
 }
 html[data-theme="light"] body.android-body .startup-screen {
   color: #172b3c;
+}
+/* 全屏播放器已移到 body，只保留播放器和黑底，避免详情页露出。 */
+html body.android-body.player-web-fullscreen {
+  background: #000;
+}
+body.player-web-fullscreen .app-shell {
+  visibility: hidden;
+}
+/* 仅旋转播放器节点，页面和 WebView 始终保留进入时的方向。 */
+@media (orientation: portrait) {
+  body.android-body:not(.tv-body).player-web-fullscreen
+    .art-video-player.art-fullscreen-web {
+    inset: auto !important;
+    top: 0 !important;
+    left: 100vw !important;
+    width: 100dvh !important;
+    height: 100vw !important;
+    transform-origin: top left;
+    transform: rotate(90deg);
+  }
 }
 .platform-android {
   font-weight: 400;
@@ -3013,6 +3080,70 @@ html[data-theme="light"] body.android-body .startup-screen {
   }
 }
 
+/* 手机端沿用系统常见的横向推入；搜索内容只做短暂显现，避免整页漂浮感。 */
+@media (max-width: 700px) {
+  body:not(.tv-body) .platform-android .search-results {
+    animation: mobile-search-in 140ms ease-out both;
+  }
+  body:not(.tv-body) .platform-android .detail-overlay {
+    animation: mobile-page-in 260ms cubic-bezier(0.2, 0, 0, 1) both;
+  }
+  body:not(.tv-body) .platform-android .detail-overlay.is-closing {
+    animation: mobile-page-out 260ms cubic-bezier(0.4, 0, 1, 1) both;
+  }
+  body:not(.tv-body) .platform-android .drawer-backdrop {
+    animation: mobile-backdrop-in 260ms ease-out both;
+  }
+  body:not(.tv-body) .platform-android .drawer-backdrop.is-closing {
+    animation: mobile-backdrop-out 260ms ease-in both;
+  }
+  body:not(.tv-body) .platform-android .settings-drawer {
+    animation: mobile-page-in 260ms cubic-bezier(0.2, 0, 0, 1) both;
+  }
+  body:not(.tv-body) .platform-android .is-closing .settings-drawer {
+    animation: mobile-page-out 260ms cubic-bezier(0.4, 0, 1, 1) both;
+  }
+}
+@keyframes mobile-search-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes mobile-page-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+@keyframes mobile-page-out {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+@keyframes mobile-backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes mobile-backdrop-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
 /* 电视使用遥控器和远距离观看；按设备类型覆盖手机断点，而非只按像素宽度判断。 */
 body.tv-body {
   min-width: 0;

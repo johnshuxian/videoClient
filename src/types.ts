@@ -106,6 +106,7 @@ declare global {
         url: string,
         title: string,
         filterAds: boolean,
+        startPosition?: number,
       ) => Promise<boolean>;
       castStop: () => Promise<void>;
       castProgress: () => Promise<{

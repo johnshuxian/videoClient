@@ -15,6 +15,7 @@ type BridgeRequest = {
   stream?: string;
   title?: string;
   isHls?: boolean;
+  startPosition?: number;
   theme?: string;
   fullscreen?: boolean;
   brightness?: number;
@@ -85,8 +86,8 @@ export async function createHarmonyVideoAPI(): Promise<Window["videoAPI"]> {
       call<{ url: string }>({ action: "proxyUrl", url, image, filterAds, deviceHost }) },
     dlna: {
       devices: () => call({ action: "devices" }),
-      cast: ({ deviceId, stream, url, title, isHls }) =>
-        call({ action: "cast", deviceId, stream, url, title, isHls }),
+      cast: ({ deviceId, stream, url, title, isHls, startPosition }) =>
+        call({ action: "cast", deviceId, stream, url, title, isHls, startPosition }),
       stop: () => call<void>({ action: "castStop" }),
       progress: () => call({ action: "castProgress" }),
       addListener: async (_name, callback) => {
@@ -108,6 +109,11 @@ export async function createHarmonyVideoAPI(): Promise<Window["videoAPI"]> {
     setSystemBarSurface: (surface) => {
       void call<void>({ action: "setSurface", surface }).catch((error) =>
         console.error("状态栏背景更新失败", error),
+      );
+    },
+    close: () => {
+      void call<void>({ action: "exitApp" }).catch((error) =>
+        console.error("鸿蒙应用退出失败", error),
       );
     },
   };

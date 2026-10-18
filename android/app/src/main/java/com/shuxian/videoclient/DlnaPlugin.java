@@ -223,6 +223,25 @@ public class DlnaPlugin extends Plugin {
                 soap(renderer, "SetAVTransportURI", "<CurrentURI>" + xml(stream)
                         + "</CurrentURI><CurrentURIMetaData>" + xml(didl) + "</CurrentURIMetaData>");
                 soap(renderer, "Play", "<Speed>1</Speed>");
+                double startPosition = call.getDouble("startPosition", 0d);
+                if (startPosition > 0) {
+                    // 部分电视会在 Play 时清除先前的 Seek，开始播放后再设置续播位置。
+                    long totalSeconds = (long) startPosition;
+                    String target = String.format(java.util.Locale.US, "%02d:%02d:%02d",
+                            totalSeconds / 3600, totalSeconds % 3600 / 60, totalSeconds % 60);
+                    for (int attempt = 0; attempt < 10; attempt++) {
+                        Thread.sleep(500);
+                        try {
+                            Document state = soap(renderer, "GetTransportInfo", "");
+                            if (text(state.getDocumentElement(), "CurrentTransportState").equals("PLAYING")) break;
+                        } catch (Exception ignored) {
+                            // 不支持状态查询时直接尝试跳转。
+                            break;
+                        }
+                    }
+                    // 部分电视已经跳转，却暂时把 GetPositionInfo 报成 0；以 Seek 的执行结果为准。
+                    soap(renderer, "Seek", "<Unit>REL_TIME</Unit><Target>" + target + "</Target>");
+                }
                 current = renderer;
                 currentUrl = call.getString("url", "");
                 seenPlaying = false;

@@ -39,8 +39,8 @@ contextBridge.exposeInMainWorld("videoAPI", {
   devices: () => ipcRenderer.invoke("devices"),
   airplayPairBegin: (id) => ipcRenderer.invoke("airplay:pair-begin", id),
   airplayPairFinish: (pin) => ipcRenderer.invoke("airplay:pair-finish", pin),
-  cast: (device, url, title, filterAds) =>
-    ipcRenderer.invoke("cast", device, url, title, filterAds),
+  cast: (device, url, title, filterAds, startPosition) =>
+    ipcRenderer.invoke("cast", device, url, title, filterAds, startPosition),
   castStop: () => ipcRenderer.invoke("cast:stop"),
   castProgress: () => ipcRenderer.invoke("cast:progress"),
   onCastEnded: (callback) => {

@@ -23,6 +23,7 @@ interface NetworkMessage {
   stream?: string;
   title?: string;
   isHls?: boolean;
+  startPosition?: number;
   theme?: string;
   fullscreen?: boolean;
   brightness?: number;
@@ -77,7 +78,11 @@ struct Index {
             const message = JSON.parse(value) as NetworkMessage;
             try {
               let data: string | number | ProxyAddress | DevicesResult | CastProgress | CastResult = '';
-              if (message.action === 'request') {
+              if (message.action === 'exitApp') {
+                const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+                await context.terminateSelf();
+                return;
+              } else if (message.action === 'request') {
                 const task = http.createHttp();
                 try {
                   const response = await task.request(message.url || '', {
@@ -102,7 +107,7 @@ struct Index {
                 data = await this.dlna.devices();
               } else if (message.action === 'cast') {
                 await this.dlna.cast(message.deviceId || '', message.stream || '', message.url || '',
-                  message.title || '视频', !!message.isHls);
+                  message.title || '视频', !!message.isHls, message.startPosition || 0);
                 data = { ok: true };
               } else if (message.action === 'castStop') {
                 await this.dlna.stop();
@@ -131,7 +136,10 @@ struct Index {
                   const enter = !!message.fullscreen;
                   if (enter && !this.fullscreen) {
                     this.oldOrientation = appWindow.getPreferredOrientation();
-                    await appWindow.setPreferredOrientation(window.Orientation.LANDSCAPE);
+                    // 页面方向保持不变；网页里的播放器单独横向铺满屏幕。
+                    appWindow.setWindowBackgroundColor('#000000');
+                    await appWindow.setWindowSystemBarEnable([]);
+                    await appWindow.setPreferredOrientation(window.Orientation.LOCKED);
                   } else if (!enter && this.fullscreen) {
                     await appWindow.setPreferredOrientation(this.oldOrientation);
                     await appWindow.setWindowBrightness(-1);

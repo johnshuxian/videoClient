@@ -23,6 +23,7 @@ export type Dlna = {
     url: string;
     title: string;
     isHls: boolean;
+    startPosition?: number;
   }): Promise<{ ok: boolean }>;
   stop(): Promise<void>;
   progress(): Promise<{
@@ -491,7 +492,7 @@ export async function createMobileVideoAPI(
     airplayPairFinish: async () => {
       throw new Error("移动端暂不支持 AirPlay");
     },
-    cast: async (device, url, title, filterAds) => {
+    cast: async (device, url, title, filterAds, startPosition = 0) => {
       const playable = await playableUrl(url);
       const stream = await proxy.url({
         url: playable,
@@ -504,13 +505,15 @@ export async function createMobileVideoAPI(
         url,
         title,
         isHls: /\.m3u8(?:$|[?#])/i.test(playable),
+        startPosition,
       });
       return result.ok;
     },
     castStop: () => dlna.stop(),
     castProgress: async () => {
       const result = await dlna.progress();
-      return result.deviceId && result.url && result.duration
+      // 部分电视始终不提供总时长，仍要把已报告的播放位置交给界面。
+      return result.deviceId && result.url
         ? {
             deviceId: result.deviceId,
             url: result.url,

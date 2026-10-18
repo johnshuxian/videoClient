@@ -55,7 +55,9 @@ npm run sync:harmony
 
 然后在 DevEco Studio 中打开 `harmony/`，同步工程。在 **File → Project Structure → Project → Signing Configs** 为连接的真机配置自动调试签名，再构建并运行 `entry`。每次修改 React 页面或更新版本号后，重新运行同步命令。网页资源随 HAP 打包，无需运行外部服务器。本地生成的 `harmony/build-profile.json5` 包含签名密码，已被 Git 忽略；不要强制添加到仓库。
 
-鸿蒙工程已接入首页、点播源请求、搜索、本地设置、图片和视频的本机代理，以及 DLNA 搜索、投屏与进度查询。进入播放页后在详情页内自动播放，手动点击全屏时横屏并隐藏系统栏，退出全屏后恢复原方向；浅色和深色模式同步设置状态栏、导航栏颜色。鸿蒙端设置使用 ArkWeb 本地存储，与安卓 SQLite 数据互不迁移。HLS 广告过滤暂未移植。
+在 Windows 上安装 PowerShell 7 并完成一次签名配置后，可连接并解锁手机，双击仓库根目录的 `build-install-harmony.cmd` 一键同步网页资源、编译签名 HAP 并覆盖安装。脚本会自动使用本机 `E:\mysoft\DevEco Studio` 或 `DEVECO_HOME` 指向的 DevEco Studio；其他安装位置可在 PowerShell 7 中运行 `./scripts/build-install-harmony.ps1 -DevEcoHome 'D:\DevEco Studio'`。连接多台设备时另加 `-DeviceId '设备编号'`，设备编号可通过 `hdc list targets -v` 查看。签名 HAP 保存在 `harmony/entry/build/default/outputs/default/entry-default-signed.hap`；脚本不会清除手机应用数据。
+
+鸿蒙工程已接入首页、点播源请求、搜索、本地设置、图片和视频的本机代理，以及 DLNA 搜索、投屏与进度查询。进入播放页后在详情页内自动播放，手动点击全屏时仅播放器横向铺满屏幕并隐藏系统栏，页面方向保持不变；浅色和深色模式同步设置状态栏、导航栏颜色。鸿蒙端设置使用 ArkWeb 本地存储，与安卓 SQLite 数据互不迁移。HLS 广告过滤暂未移植。
 
 API 26 工程已通过 DevEco Studio 26.0.0 编译与调试签名；真机已验证海报和视频经代理加载。DLNA 仍需在同一局域网的电视上做投屏验收。
 

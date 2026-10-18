@@ -100,21 +100,27 @@ export class Proxy {
 
       // 流式传送视频和图片，避免把整部影片放进 ArkTS 内存；Range 原样交给上游。
       let writes: Promise<void> = Promise.resolve();
+      let chunked = true;
       task.on('headersReceive', (raw) => {
         const header = raw as Record<string, string>;
         const status = Number(String(header['status-line'] || '').match(/\s(\d{3})\s/)?.[1] || 200);
         const type = header['content-type'] || 'application/octet-stream';
         const contentRange = header['content-range'] ? `Content-Range: ${header['content-range']}\r\n` : '';
         const acceptRanges = header['accept-ranges'] ? `Accept-Ranges: ${header['accept-ranges']}\r\n` : '';
+        // 电视通过 Range 跳转 MP4 时通常需要明确的响应长度。
+        const length = header['content-length'];
+        chunked = !/^\d+$/.test(length || '');
+        const framing = chunked ? 'Transfer-Encoding: chunked\r\n' : `Content-Length: ${length}\r\n`;
         sentHeaders = true;
-        writes = writes.then(() => client.send({ data: `HTTP/1.1 ${status} OK\r\nContent-Type: ${type}\r\n${contentRange}${acceptRanges}Access-Control-Allow-Origin: *\r\nCache-Control: ${image ? 'private, max-age=86400' : 'no-store'}\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n` }));
+        const cache = image && status >= 200 && status < 300 ? 'private, max-age=86400' : 'no-store';
+        writes = writes.then(() => client.send({ data: `HTTP/1.1 ${status} ${status === 206 ? 'Partial Content' : 'OK'}\r\nContent-Type: ${type}\r\n${contentRange}${acceptRanges}Access-Control-Allow-Origin: *\r\nCache-Control: ${cache}\r\n${framing}Connection: close\r\n\r\n` }));
       });
       task.on('dataReceive', (chunk) => {
         if (first[0] === 'HEAD') return;
         writes = writes.then(async () => {
-          await client.send({ data: `${chunk.byteLength.toString(16)}\r\n` });
+          if (chunked) await client.send({ data: `${chunk.byteLength.toString(16)}\r\n` });
           await client.send({ data: chunk });
-          await client.send({ data: '\r\n' });
+          if (chunked) await client.send({ data: '\r\n' });
         });
       });
       await task.requestInStream(target, {
@@ -124,7 +130,7 @@ export class Proxy {
         await this.error(client, 502);
       } else {
         await writes;
-        await client.send({ data: '0\r\n\r\n' });
+        if (chunked && first[0] !== 'HEAD') await client.send({ data: '0\r\n\r\n' });
       }
     } catch {
       // 一旦已发送响应头，连接关闭会通知播放器重试；此时不能再写第二份 HTTP 响应。

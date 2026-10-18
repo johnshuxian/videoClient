@@ -797,7 +797,7 @@ ipcMain.handle("airplay:pair-finish", async (_, pin) => {
   );
   return true;
 });
-ipcMain.handle("cast", async (_, device, url, title, filterAds) => {
+ipcMain.handle("cast", async (_, device, url, title, filterAds, startPosition = 0) => {
   const playable = await resolvePlayableUrl(url);
   const localIp = device.localAddress || (await getLanIp(device.host));
   const stream = proxyUrl(playable, filterAds, localIp);
@@ -808,7 +808,7 @@ ipcMain.handle("cast", async (_, device, url, title, filterAds) => {
     currentCast = { type: "airplay", device, url, sessionId };
     return true;
   }
-  const { DlnaControlPoint, buildDidl } = await import("@sonn-audio/node-upnp");
+  const { DlnaControlPoint, buildDidl, buildSoapRequest } = await import("@sonn-audio/node-upnp");
   const mime = /\.m3u8(?:$|[?#])/i.test(playable)
     ? "application/vnd.apple.mpegurl"
     : "video/mp4";
@@ -834,6 +834,7 @@ ipcMain.handle("cast", async (_, device, url, title, filterAds) => {
     seenPlaying: false,
   };
   currentCast = cast;
+  let started = false;
   try {
     const formats = await control.getSinkContentTypes();
     if (
@@ -863,13 +864,34 @@ ipcMain.handle("cast", async (_, device, url, title, filterAds) => {
       console.warn("DLNA 播放状态订阅失败：", error);
     }
     const ok = await control.setUri(stream, didl);
+    started = ok;
     if (!ok && currentCast === cast) {
       currentCast = null;
       control.dispose();
     }
+    if (ok && startPosition > 0) {
+      // node-upnp 的 setUri 会立即 Play，因此收到确认后再 Seek 到续播位置。
+      const totalSeconds = Math.floor(startPosition);
+      const target = `${String(Math.floor(totalSeconds / 3600)).padStart(2, "0")}:${String(Math.floor(totalSeconds % 3600 / 60)).padStart(2, "0")}:${String(totalSeconds % 60).padStart(2, "0")}`;
+      const serviceType = "urn:schemas-upnp-org:service:AVTransport:1";
+      const response = await fetch(control.controlUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "text/xml; charset=utf-8",
+          SOAPAction: `"${serviceType}#Seek"`,
+        },
+        body: buildSoapRequest(serviceType, "Seek", {
+          Unit: "REL_TIME",
+          Target: target,
+        }),
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!response.ok) throw new Error(`电视不支持从指定进度开始播放（HTTP ${response.status}）`);
+    }
     return ok;
   } catch (error) {
     if (currentCast === cast) currentCast = null;
+    if (started) await control.stop().catch(() => {});
     control.dispose();
     throw error;
   }
@@ -909,7 +931,7 @@ ipcMain.handle("cast:progress", async () => {
       const position = parseTime(extractTag(body, "RelTime"));
       const duration =
         parseTime(extractTag(body, "TrackDuration")) || cast.duration;
-      if (duration > 0) progress = { position, duration };
+      progress = { position, duration };
     }
     if (currentCast !== cast || !progress) return null;
     return { deviceId: cast.device.id, url: cast.url, ...progress };

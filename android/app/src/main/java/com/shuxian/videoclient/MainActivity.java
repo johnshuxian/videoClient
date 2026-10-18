@@ -2,11 +2,14 @@ package com.shuxian.videoclient;
 
 import android.content.Context;
 import android.os.Bundle;
+import androidx.core.splashscreen.SplashScreen;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        // 启动后切换到 WebView 页面使用的无标题栏主题。
+        SplashScreen.installSplashScreen(this);
         registerPlugin(VideoProxyPlugin.class);
         registerPlugin(DlnaPlugin.class);
         registerPlugin(StatusBarPlugin.class);

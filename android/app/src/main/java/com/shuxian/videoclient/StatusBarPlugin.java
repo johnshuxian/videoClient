@@ -62,8 +62,14 @@ public class StatusBarPlugin extends Plugin {
             Activity activity = getActivity();
             if (enterFullscreen && !fullscreen) {
                 previousOrientation = activity.getRequestedOrientation();
-                activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
-            } else if (!enterFullscreen && fullscreen) {
+                fullscreen = true;
+                // 锁住页面方向，只由网页中的播放器横向铺满屏幕。
+                applyColor(activity, light, true);
+                activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LOCKED);
+                call.resolve();
+                return;
+            }
+            if (!enterFullscreen && fullscreen) {
                 activity.setRequestedOrientation(previousOrientation);
             }
             fullscreen = enterFullscreen;
