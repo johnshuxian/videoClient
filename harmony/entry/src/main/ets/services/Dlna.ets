@@ -85,8 +85,14 @@ export class Dlna {
         await new Promise<void>((resolve) => setTimeout(resolve, 1000));
       }
       await new Promise<void>((resolve) => setTimeout(resolve, 1000));
+    } catch (error) {
+      throw new Error(`搜索电视失败：${String(error)}`);
     } finally {
-      await udp.close();
+      try {
+        await udp.close();
+      } catch {
+        // 绑定失败时套接字可能尚未启动。
+      }
     }
     const found = await Promise.all(Array.from(locations).slice(0, 20).map((location) => this.describe(location)));
     const items: DlnaDevice[] = [];
@@ -211,6 +217,8 @@ export class Dlna {
         usingCache: false, connectTimeout: 4000, readTimeout: 5000 });
       if (response.responseCode !== 200) throw new Error(`电视返回 HTTP ${response.responseCode}`);
       return String(response.result);
+    } catch (error) {
+      throw new Error(`电视 ${action} 请求失败：${String(error)}`);
     } finally {
       task.destroy();
     }

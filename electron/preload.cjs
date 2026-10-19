@@ -37,8 +37,8 @@ contextBridge.exposeInMainWorld("videoAPI", {
   streamUrl: (url, filterAds) =>
     ipcRenderer.invoke("stream-url", url, filterAds),
   devices: () => ipcRenderer.invoke("devices"),
-  cast: (device, url, title, filterAds, startPosition) =>
-    ipcRenderer.invoke("cast", device, url, title, filterAds, startPosition),
+  cast: (device, url, title, startPosition) =>
+    ipcRenderer.invoke("cast", device, url, title, startPosition),
   castStop: () => ipcRenderer.invoke("cast:stop"),
   castProgress: () => ipcRenderer.invoke("cast:progress"),
   onCastEnded: (callback) => {

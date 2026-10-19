@@ -60,7 +60,7 @@ npm run sync:harmony
 
 API 26 工程已通过 DevEco Studio 26.0.0 编译与调试签名；真机已验证海报和视频经代理加载。DLNA 仍需在同一局域网的电视上做投屏验收。
 
-安装包输出到 `release/`。字体文件随安装包提供，不需要启动时连接 Google Fonts。macOS 发布给其他电脑时，需要按 Apple 的要求签名和公证。首页数据和点播资源都依赖相应的第三方服务；个别线路失效时，可以在搜索结果中换源。接收设备需支持对应的投屏协议，且能访问电脑或手机的局域网地址。
+安装包输出到 `release/`。字体文件随安装包提供，不需要启动时连接 Google Fonts。macOS 发布给其他电脑时，需要按 Apple 的要求签名和公证。首页数据和点播资源都依赖相应的第三方服务；个别线路失效时，可以在搜索结果中换源。接收设备需支持对应的投屏协议，并能自行访问视频源地址。
 Windows 安装包使用安装向导，可在安装时选择目录。
 发布新版本时，先更新 `package.json` 的版本号，再推送对应的 `vX.Y.Z` 标签。GitHub Actions 会构建 Windows x64 安装包、Apple Silicon（ARM64）macOS DMG、Android 正式签名 APK 和 HarmonyOS 签名 HAP，并发布到 GitHub Releases。文件名分别为 `videoClient-vX.Y.Z-windows-x64.exe`、`videoClient-vX.Y.Z-macos-arm64.dmg`、`videoClient-vX.Y.Z-android.apk` 和 `videoClient-vX.Y.Z-harmony.hap`，也可在运行记录的 Artifacts 中下载。桌面端 CI 产物未签名；向其他 Mac 分发前仍需配置 Apple 签名和公证。
 
@@ -93,5 +93,5 @@ open "/Applications/影窗.app"
 
 Windows 安装版的 `settings.db` 位于实际安装目录（例如 `E:\mysoft\videoClient\settings.db`），该目录需要允许当前用户写入。安装新版本时，安装器会先备份旧数据库，再恢复到新安装目录；开发版和 macOS 仍使用系统用户数据目录。
 旧版 `localStorage` 和 `settings.json` 不会迁移到 SQLite，首次使用新版需要重新设置。
-DLNA 投屏要求接收设备能访问电脑的局域网代理。投屏发送的是视频流，播放器上绘制的弹幕不会自动随视频一起投出。
+DLNA 投屏把视频源地址直接发给接收设备，由接收设备自行取流。需要代理补充请求头、依赖广告过滤或电视无法直接访问的视频源可能无法播放。播放器上绘制的弹幕不会自动随视频一起投出。
 macOS 首次搜索投屏设备时，请允许「影窗」访问本地网络；若之前拒绝，可在「系统设置 → 隐私与安全性 → 本地网络」中重新开启，然后在投屏窗口重新搜索。

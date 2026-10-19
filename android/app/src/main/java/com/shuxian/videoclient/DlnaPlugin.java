@@ -214,7 +214,9 @@ public class DlnaPlugin extends Plugin {
             }
             try {
                 URL streamUrl = new URL(stream);
-                if (!streamUrl.getProtocol().equals("http")) throw new IllegalArgumentException("视频地址无效");
+                // 直连视频源可能使用 HTTPS，电视会自行请求这个地址。
+                if (!streamUrl.getProtocol().equals("http") && !streamUrl.getProtocol().equals("https"))
+                    throw new IllegalArgumentException("视频地址无效");
                 try {
                     stopCurrent();
                 } catch (Exception ignored) {

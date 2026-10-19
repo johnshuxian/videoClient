@@ -488,16 +488,12 @@ export async function createMobileVideoAPI(
       };
     },
     devices: () => dlna.devices(),
-    cast: async (device, url, title, filterAds, startPosition = 0) => {
+    cast: async (device, url, title, startPosition = 0) => {
       const playable = await playableUrl(url);
-      const stream = await proxy.url({
-        url: playable,
-        filterAds,
-        deviceHost: device.host,
-      });
       const result = await dlna.cast({
         deviceId: device.id,
-        stream: stream.url,
+        // DLNA 接收设备自行请求源站，本机代理仅供本机播放器使用。
+        stream: playable,
         url,
         title,
         isHls: /\.m3u8(?:$|[?#])/i.test(playable),

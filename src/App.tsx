@@ -1473,7 +1473,6 @@ export default function App() {
             castingDevice,
             next.url,
             `${detail.title} · ${next.label}`,
-            filterAds,
             0,
           );
           if (!ok) throw new Error("电视未接受下一集播放请求");
@@ -1491,7 +1490,7 @@ export default function App() {
           setCastBusy(false);
         }
       }),
-    [castingDevice, detail, line, episode, autoplay, filterAds],
+    [castingDevice, detail, line, episode, autoplay],
   );
 
   useEffect(() => {
@@ -1906,7 +1905,6 @@ export default function App() {
       device,
       current.url,
       `${detail.title} · ${current.label}`,
-      filterAds,
       startPosition,
     );
     if (!ok) throw new Error("电视未接受播放请求");
@@ -3566,7 +3564,7 @@ export default function App() {
             <p>
               确保{window.videoAPI.platform === "android" ? "手机" : "电脑"}
               和电视在同一局域网。
-              支持 DLNA 视频接收设备。
+              支持 DLNA 视频接收设备。电视将直接访问视频源，本机广告过滤不作用于投屏。
             </p>
             {castBusy && (
               <div className="loading">

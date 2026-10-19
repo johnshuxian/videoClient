@@ -746,11 +746,12 @@ ipcMain.handle("devices", async () => {
     return { items: [], warnings: [`DLNA：${error.message}`] };
   }
 });
-ipcMain.handle("cast", async (_, device, url, title, filterAds, startPosition = 0) => {
+ipcMain.handle("cast", async (_, device, url, title, startPosition = 0) => {
   if (device.type !== "dlna") throw new Error("只支持 DLNA 投屏设备");
   const playable = await resolvePlayableUrl(url);
   const localIp = device.localAddress || (await getLanIp(device.host));
-  const stream = proxyUrl(playable, filterAds, localIp);
+  // 电视直接从视频源取流；本机地址只用于接收 DLNA 播放状态事件。
+  const stream = playable;
   await stopCurrentCast();
   const { DlnaControlPoint, buildDidl, buildSoapRequest, extractTag } =
     await import("@sonn-audio/node-upnp");

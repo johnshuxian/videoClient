@@ -102,7 +102,6 @@ declare global {
         device: Device,
         url: string,
         title: string,
-        filterAds: boolean,
         startPosition?: number,
       ) => Promise<boolean>;
       castStop: () => Promise<void>;

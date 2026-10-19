@@ -13,8 +13,12 @@ export class Proxy {
   private port = 0;
 
   async start(): Promise<void> {
-    await this.server.listen({ address: '0.0.0.0', port: 0 });
-    this.port = (await this.server.getLocalAddress()).port || 0;
+    try {
+      await this.server.listen({ address: '0.0.0.0', port: 0 });
+      this.port = (await this.server.getLocalAddress()).port || 0;
+    } catch (error) {
+      throw new Error(`启动本机代理失败：${String(error)}`);
+    }
     this.server.on('connect', (client) => {
       let request = '';
       client.on('message', (event) => {
@@ -32,11 +36,20 @@ export class Proxy {
   }
 
   async close(): Promise<void> {
-    await this.server.close();
+    try {
+      await this.server.close();
+    } catch {
+      // 启动失败时套接字可能尚未打开。
+    }
   }
 
   async address(target: string, image: boolean, filterAds: boolean, deviceHost?: string): Promise<string> {
-    const parsed = url.URL.parseURL(target);
+    let parsed: url.URL;
+    try {
+      parsed = url.URL.parseURL(target);
+    } catch {
+      throw new Error('代理地址无效');
+    }
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('代理地址无效');
     if (!this.port) throw new Error('本地代理未启动');
     let host = '127.0.0.1';
@@ -53,14 +66,26 @@ export class Proxy {
       await this.error(client, 405);
       return;
     }
-    const local = url.URL.parseURL(first[1], 'http://127.0.0.1');
+    let local: url.URL;
+    try {
+      local = url.URL.parseURL(first[1], 'http://127.0.0.1');
+    } catch {
+      await this.error(client, 400);
+      return;
+    }
     const image = local.pathname === `/${this.token}/image`;
     if (!image && local.pathname !== `/${this.token}/stream`) {
       await this.error(client, 404);
       return;
     }
-    const target = local.searchParams.get('url') || '';
-    const parsed = url.URL.parseURL(target);
+    const target = local.params.get('url') || '';
+    let parsed: url.URL;
+    try {
+      parsed = url.URL.parseURL(target);
+    } catch {
+      await this.error(client, 400);
+      return;
+    }
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
       await this.error(client, 400);
       return;
@@ -89,7 +114,7 @@ export class Proxy {
         const host = (await client.getLocalAddress()).address;
         const rewritten = String(response.result).replace(/URI="([^"]+)"|^(?!#|\s*$)(.+)$/gm, (match, nested: string, line: string) => {
           const source = url.URL.parseURL(nested || line, base).toString();
-          const address = `http://${host}:${this.port}/${this.token}/stream?url=${encodeURIComponent(source)}&ads=${local.searchParams.get('ads') || '0'}`;
+          const address = `http://${host}:${this.port}/${this.token}/stream?url=${encodeURIComponent(source)}&ads=${local.params.get('ads') || '0'}`;
           return nested ? `URI="${address}"` : address;
         });
         const body = encoder.encodeInto(rewritten);
@@ -141,6 +166,10 @@ export class Proxy {
   }
 
   private async error(client: socket.TCPSocketConnection, status: number): Promise<void> {
-    await client.send({ data: `HTTP/1.1 ${status} Error\r\nContent-Length: 0\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n` });
+    try {
+      await client.send({ data: `HTTP/1.1 ${status} Error\r\nContent-Length: 0\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n` });
+    } catch {
+      // 对端已断开时，错误响应也无法再发送。
+    }
   }
 }

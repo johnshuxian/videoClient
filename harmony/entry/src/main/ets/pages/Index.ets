@@ -58,8 +58,13 @@ struct Index {
 
   onBackPress(): boolean {
     // 网页自己处理详情、设置与播放器的返回层级。
-    this.port?.postMessageEvent('__harmony_back__');
-    return true;
+    try {
+      this.port?.postMessageEvent('__harmony_back__');
+      return true;
+    } catch {
+      // 网页通道已关闭时交由系统处理返回键。
+      return false;
+    }
   }
 
   build() {
@@ -137,7 +142,6 @@ struct Index {
                   if (enter && !this.fullscreen) {
                     this.oldOrientation = appWindow.getPreferredOrientation();
                     // 页面方向保持不变；网页里的播放器单独横向铺满屏幕。
-                    appWindow.setWindowBackgroundColor('#000000');
                     await appWindow.setWindowSystemBarEnable([]);
                     await appWindow.setPreferredOrientation(window.Orientation.LOCKED);
                   } else if (!enter && this.fullscreen) {
@@ -154,7 +158,6 @@ struct Index {
                   statusColor = '#FAFCFD';
                 const contentColor = this.light && !this.fullscreen ? '#172B3C' : '#EAF2FA';
                 // 手势导航区采用窗口底色；状态栏文字显式指定颜色，避免浅色主题下图标发灰。
-                appWindow.setWindowBackgroundColor(color);
                 await appWindow.setWindowSystemBarProperties({ statusBarColor: statusColor,
                   navigationBarColor: color,
                   statusBarContentColor: contentColor, navigationBarContentColor: contentColor });
