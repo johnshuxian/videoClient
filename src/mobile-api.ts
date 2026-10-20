@@ -38,7 +38,6 @@ export type Dlna = {
   ): Promise<{ remove(): Promise<void> }>;
 };
 export type AppStatusBar = {
-  deviceInfo(): Promise<{ isTv: boolean }>;
   setTheme(options: { theme: "light" | "dark" }): Promise<void>;
   setFullscreen(options: { fullscreen: boolean }): Promise<void>;
   getBrightness(): Promise<{ brightness: number }>;
@@ -167,10 +166,6 @@ export async function createMobileVideoAPI(
   services = native;
   const { proxy, dlna, statusBar } = native;
   const root = document.getElementById("root")!;
-  // React 挂载前标记电视设备，首屏直接使用大屏布局和遥控器导航。
-  root.dataset.startupStep = "识别设备";
-  const { isTv } = await statusBar.deviceInfo();
-  if (isTv) document.body.classList.add("tv-body");
   root.dataset.startupStep = "读取本机设置";
   const settings = await native.loadSettings();
   // 首次安装默认浅色；已有设置仍优先，避免覆盖用户手动选择。

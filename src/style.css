@@ -1514,8 +1514,7 @@ a {
   pointer-events: none;
 }
 .art-video-player.art-control-show:is(.art-fullscreen, .art-fullscreen-web)
-  .player-fullscreen-title,
-.tv-fullscreen .art-video-player.art-control-show .player-fullscreen-title {
+  .player-fullscreen-title {
   display: block;
 }
 .art-video-player .art-controls .art-control-nextEpisode {
@@ -1532,8 +1531,7 @@ a {
   pointer-events: none;
 }
 .art-video-player.has-next-episode:is(.art-fullscreen, .art-fullscreen-web)
-  .art-control-nextEpisode,
-.tv-fullscreen .art-video-player.has-next-episode .art-control-nextEpisode {
+  .art-control-nextEpisode {
   display: flex;
 }
 /* 鸿蒙竖屏播放器较窄：收紧按钮并保留右侧空间，避免全屏键被裁掉。 */
@@ -2703,7 +2701,7 @@ body.player-web-fullscreen .app-shell {
 }
 /* 仅旋转播放器节点，页面和 WebView 始终保留进入时的方向。 */
 @media (orientation: portrait) {
-  body.android-body:not(.tv-body).player-web-fullscreen
+  body.android-body.player-web-fullscreen
     .art-video-player.art-fullscreen-web {
     inset: auto !important;
     top: 0 !important;
@@ -3080,25 +3078,25 @@ body.player-web-fullscreen .app-shell {
 
 /* 窄屏安卓页面统一从右侧滑入，搜索结果和详情页保持一致。 */
 @media (max-width: 700px) {
-  body:not(.tv-body) .platform-android .search-results {
+  .platform-android .search-results {
     animation: mobile-page-in 260ms cubic-bezier(0.2, 0, 0, 1) both;
   }
-  body:not(.tv-body) .platform-android .detail-overlay {
+  .platform-android .detail-overlay {
     animation: mobile-page-in 260ms cubic-bezier(0.2, 0, 0, 1) both;
   }
-  body:not(.tv-body) .platform-android .detail-overlay.is-closing {
+  .platform-android .detail-overlay.is-closing {
     animation: mobile-page-out 260ms cubic-bezier(0.4, 0, 1, 1) both;
   }
-  body:not(.tv-body) .platform-android .drawer-backdrop {
+  .platform-android .drawer-backdrop {
     animation: mobile-backdrop-in 260ms ease-out both;
   }
-  body:not(.tv-body) .platform-android .drawer-backdrop.is-closing {
+  .platform-android .drawer-backdrop.is-closing {
     animation: mobile-backdrop-out 260ms ease-in both;
   }
-  body:not(.tv-body) .platform-android .settings-drawer {
+  .platform-android .settings-drawer {
     animation: mobile-page-in 260ms cubic-bezier(0.2, 0, 0, 1) both;
   }
-  body:not(.tv-body) .platform-android .is-closing .settings-drawer {
+  .platform-android .is-closing .settings-drawer {
     animation: mobile-page-out 260ms cubic-bezier(0.4, 0, 1, 1) both;
   }
 }
@@ -3132,229 +3130,6 @@ body.player-web-fullscreen .app-shell {
   }
   to {
     opacity: 0;
-  }
-}
-/* 电视使用遥控器和远距离观看；按设备类型覆盖手机断点，而非只按像素宽度判断。 */
-body.tv-body {
-  min-width: 0;
-}
-.tv-body .app-shell,
-.tv-body .main-area,
-.tv-body .detail-overlay {
-  height: 100dvh;
-}
-.tv-body .sidebar {
-  position: relative;
-  inset: auto;
-  z-index: auto;
-  width: 210px;
-  height: 100dvh;
-  padding: 25px 13px 18px;
-  flex-direction: column;
-  align-items: stretch;
-  border-right: 1px solid #294052;
-  border-top: 0;
-}
-.tv-body .sidebar .brand {
-  flex: none;
-  width: auto;
-  height: 48px;
-  margin: 0 8px 29px;
-  padding: 0;
-  flex-direction: row;
-  justify-content: flex-start;
-  gap: 10px;
-  font-size: 16px;
-}
-.tv-body .sidebar .brand-mark {
-  width: 38px;
-  height: 38px;
-}
-.tv-body .sidebar .brand-title,
-.tv-body .sidebar .nav-caption,
-.tv-body .sidebar-bottom,
-.tv-body .sidebar .mobile-category-nav,
-.tv-body .sidebar .nav-label-desktop {
-  display: block;
-}
-.tv-body .sidebar .brand-mobile-label,
-.tv-body .sidebar .nav-label-mobile,
-.tv-body .mobile-channel-tabs,
-.tv-body .topbar-caption {
-  display: none;
-}
-.tv-body .sidebar .nav-item {
-  flex: none;
-  width: 100%;
-  height: 50px;
-  margin-bottom: 5px;
-  padding: 0 13px;
-  flex-direction: row;
-  justify-content: flex-start;
-  gap: 12px;
-  font-size: 15px;
-  font-weight: 600;
-}
-.tv-body .sidebar .nav-count {
-  display: block;
-}
-.tv-body .topbar {
-  height: 76px;
-  padding: 0 28px;
-  gap: 20px;
-}
-.tv-body .top-actions {
-  display: flex;
-}
-.tv-body .top-actions button {
-  width: 42px;
-  height: 42px;
-}
-.tv-body .search-box {
-  max-width: 650px;
-}
-.tv-body .search-form {
-  height: 50px;
-}
-.tv-body .search-form input,
-.tv-body .recent-search-term {
-  font-size: 16px;
-}
-.tv-body .search-form button {
-  height: 38px;
-  padding: 0 18px;
-  font-size: 14px;
-}
-.tv-body .recent-searches {
-  padding: 15px;
-}
-.tv-body .recent-searches-heading,
-.tv-body .recent-searches-heading button {
-  font-size: 14px;
-}
-.tv-body .recent-search-term {
-  min-height: 46px;
-}
-.tv-body .page-scroll {
-  padding-bottom: 0;
-}
-.tv-body .content {
-  padding: 26px 30px 70px;
-}
-.tv-body .hero {
-  display: none;
-}
-.tv-body .catalog-section {
-  margin-top: 10px;
-}
-.tv-body .catalog-section .section-heading {
-  display: flex;
-}
-.tv-body .catalog-section .tag-list {
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  scrollbar-width: none;
-  padding: 4px 4px 8px;
-  margin-left: -4px;
-}
-.tv-body .catalog-section .tag-list::-webkit-scrollbar {
-  display: none;
-}
-.tv-body .catalog-section .tag-list button {
-  flex: none;
-}
-.tv-body .poster-grid {
-  grid-template-columns: repeat(auto-fill, minmax(145px, 1fr));
-  gap: 20px 15px;
-}
-.tv-body .poster-info strong,
-.tv-body .tag-list button,
-.tv-body .player-title h2,
-.tv-body .panel-title {
-  font-size: 16px;
-}
-.tv-body .poster-info small,
-.tv-body .search-subtitle,
-.tv-body .detail-hero p,
-.tv-body .settings-body,
-.tv-body .line-list button,
-.tv-body .episode-list button {
-  font-size: 14px;
-}
-.tv-body .tag-list button,
-.tv-body .line-list button,
-.tv-body .episode-list button,
-.tv-body .player-actions button {
-  min-height: 43px;
-}
-.tv-body .detail-content {
-  padding: 26px 30px;
-}
-.tv-body .detail-toolbar {
-  height: 72px;
-}
-.tv-body .detail-toolbar > button:first-child {
-  font-size: 15px;
-}
-.tv-body .detail-hero h1 {
-  font-size: 32px;
-}
-.tv-body .episode-list {
-  max-height: 330px;
-}
-.tv-body .settings-drawer {
-  width: min(520px, 82vw);
-}
-.tv-body .cast-modal {
-  max-width: min(620px, calc(100vw - 60px));
-}
-.tv-body button:focus,
-.tv-body input:focus,
-.tv-body textarea:focus,
-.tv-body [data-tv-focus]:focus {
-  outline: 3px solid #67dffa;
-  outline-offset: 3px;
-  box-shadow: 0 0 0 6px #2ac4e144;
-}
-.tv-body .poster-card:focus {
-  transform: translateY(-3px);
-  border-color: #67dffa;
-}
-.tv-body .poster-card:focus .poster-play {
-  opacity: 1;
-  transform: translate(-50%, -50%) scale(1);
-}
-.tv-body .video-shell.tv-fullscreen {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  width: 100vw;
-  height: 100dvh;
-  aspect-ratio: auto;
-  border: 0;
-  border-radius: 0;
-}
-.tv-player-hint {
-  position: absolute;
-  z-index: 5;
-  right: 24px;
-  bottom: 24px;
-  padding: 8px 13px;
-  border-radius: 8px;
-  background: #07131dc9;
-  color: #e8f5f8;
-  font-size: 14px;
-  pointer-events: none;
-  animation: tv-hint-hide 0.4s 6s forwards;
-}
-@keyframes tv-hint-hide {
-  to {
-    opacity: 0;
-  }
-}
-@media (min-width: 1100px) {
-  .tv-body .detail-content {
-    grid-template-columns: minmax(0, 1fr) 290px;
   }
 }
 @media (prefers-reduced-motion: reduce) {

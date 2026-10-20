@@ -106,6 +106,30 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Build signed native TV APK
+        working-directory: android-tv
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleRelease
+      - name: Verify TV APK signature
+        run: |
+          certs=$("$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs android-tv/app/build/outputs/apk/release/app-release.apk)
+          echo "$certs"
+          if ! grep -Fqi '7f983ef32a1b69a84ed194797813e188c466ddbccee1a743890c6f36b558fed1' <<< "$certs"; then
+            echo "::error::TV APK certificate does not match the release signing key"
+            exit 1
+          fi
+      - name: Prepare TV APK artifact
+        run: cp android-tv/app/build/outputs/apk/release/app-release.apk "release/videoClient-${GITHUB_REF_NAME}-android-tv.apk"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: videoClient-${{ github.ref_name }}-android-tv
+          path: release/videoClient-${{ github.ref_name }}-android-tv.apk
+          if-no-files-found: error
+          retention-days: 14
+
   release:
     name: Publish GitHub release
     if: startsWith(github.ref, 'refs/tags/v')
@@ -124,6 +148,7 @@ jobs:
             "release/videoClient-${GITHUB_REF_NAME}-windows-x64.exe" \
             "release/videoClient-${GITHUB_REF_NAME}-macos-arm64.dmg" \
             "release/videoClient-${GITHUB_REF_NAME}-android.apk" \
+            "release/videoClient-${GITHUB_REF_NAME}-android-tv.apk" \
             --verify-tag --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}

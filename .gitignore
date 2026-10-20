@@ -13,6 +13,9 @@ __pycache__/
 *.p12
 *.p7b
 *.cer
+# 本地安卓正式签名密码，不提交到仓库。
+/signing-password.txt
+/harmony-signing/
 .DS_Store
 .playwright-cli/
 harmony/entry/src/main/resources/rawfile/www/
@@ -22,3 +25,9 @@ harmony/entry/build/
 harmony/build/
 harmony/oh_modules/
 harmony/.idea/
+android-tv/.gradle/
+android-tv/.kotlin/
+android-tv/.idea/
+android-tv/build/
+android-tv/app/build/
+android-tv/local.properties

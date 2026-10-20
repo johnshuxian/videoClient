@@ -2,7 +2,15 @@ apply plugin: 'com.android.application'
 
 def appVersion = new groovy.json.JsonSlurper().parse(file('../../package.json')).version
 def versionParts = appVersion.tokenize('.')
+def repositoryRoot = rootProject.projectDir.parentFile
 def signingStorePath = System.getenv('ANDROID_KEYSTORE_PATH')
+def signingStore = signingStorePath ? file(signingStorePath) : new File(repositoryRoot, 'videoclient-release.jks')
+def signingPassword = System.getenv('ANDROID_KEYSTORE_PASSWORD')
+def signingPasswordFile = new File(repositoryRoot, 'signing-password.txt')
+if (!signingPassword && signingPasswordFile.isFile()) {
+    signingPassword = signingPasswordFile.text.trim()
+}
+def hasReleaseSigning = signingStore.isFile() && signingPassword
 
 android {
     namespace = "com.shuxian.videoclient"
@@ -21,13 +29,13 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
-    if (signingStorePath) {
+    if (hasReleaseSigning) {
         signingConfigs {
             release {
-                storeFile file(signingStorePath)
-                storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                storeFile signingStore
+                storePassword signingPassword
                 keyAlias 'videoclient'
-                keyPassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                keyPassword signingPassword
             }
         }
     }
@@ -35,7 +43,7 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-            if (signingStorePath) signingConfig signingConfigs.release
+            if (hasReleaseSigning) signingConfig signingConfigs.release
         }
     }
 }

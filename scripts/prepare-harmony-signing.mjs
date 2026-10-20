@@ -8,10 +8,9 @@ const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const templatePath = path.join(project, "harmony", "build-profile.template.json");
 const profilePath = process.env.HARMONY_BUILD_PROFILE_PATH ||
   path.join(project, "harmony", "build-profile.json5");
-const signingDir = process.env.HARMONY_SIGNING_DIR;
+const signingDir = process.env.HARMONY_SIGNING_DIR || path.join(project, "harmony-signing");
 const certificateSha256 = "50599d171bf509a40dfa214b5bcd366b2b6ff9c762aa67781a600b8b79c4c5c6";
 
-if (!signingDir) throw new Error("缺少 HARMONY_SIGNING_DIR");
 for (const file of ["signing.cer", "signing.p7b", "signing.p12", "build-profile.json5"])
   if (!fs.existsSync(path.join(signingDir, file))) throw new Error(`签名包缺少 ${file}`);
 if (!fs.existsSync(path.join(signingDir, "material")))

@@ -15,7 +15,6 @@ import {
   ListFilter,
   LoaderCircle,
   MonitorPlay,
-  Maximize2,
   Play,
   RefreshCw,
   Search,
@@ -41,7 +40,6 @@ import type {
   SourceHealth,
   VodDetail,
 } from "./types";
-import { focusTvElement, moveTvFocus } from "./tv-navigation";
 
 // 补齐豆瓣分类接口列出的标签，并保留现有可用的“动画”和“最新”入口。
 const MOVIE_TAGS = [
@@ -514,7 +512,6 @@ function Player({
   onNextEpisode,
   onFailure,
   playerInstance,
-  tvFullscreen,
 }: {
   url: string;
   filterAds: boolean;
@@ -528,7 +525,6 @@ function Player({
   onNextEpisode: () => void;
   onFailure: (position: number) => boolean;
   playerInstance: React.RefObject<Artplayer | null>;
-  tvFullscreen: boolean;
 }) {
   const playerRef = useRef<HTMLDivElement>(null);
   const artRef = useRef<Artplayer | null>(null);
@@ -684,9 +680,8 @@ function Player({
           setting: true,
           playbackRate: true,
           pip: true,
-          // 手机 WebView 使用网页全屏；电视由页面管理全屏和遥控器返回。
           fullscreen: window.videoAPI.platform !== "android",
-          fullscreenWeb: !document.body.classList.contains("tv-body"),
+          fullscreenWeb: true,
         });
         artRef.current = art;
         playerInstance.current = art;
@@ -742,8 +737,7 @@ function Player({
               fullscreen && window.matchMedia("(orientation: portrait)").matches;
             window.videoAPI.setVideoFullscreen(fullscreen);
           });
-          if (!document.body.classList.contains("tv-body"))
-            stopTouchGesturesRef.current = enableMobilePlaybackGestures(art);
+          stopTouchGesturesRef.current = enableMobilePlaybackGestures(art);
         }
         art.on("video:loadedmetadata", () => {
           const current = sourceRef.current;
@@ -798,27 +792,14 @@ function Player({
   }, [url, filterAds, playbackSerial]);
 
   return (
-    <div
-      className={`video-shell ${tvFullscreen ? "tv-fullscreen" : ""}`}
-      data-tv-focus={
-        document.body.classList.contains("tv-body") ? "" : undefined
-      }
-      tabIndex={document.body.classList.contains("tv-body") ? 0 : undefined}
-      aria-label="播放器：确定键暂停或继续，左右键快退或快进十秒"
-    >
+    <div className="video-shell">
       <div ref={playerRef} className="artplayer-host" />
       {error && <div className="video-error">{error}</div>}
-      {tvFullscreen && (
-        <div className="tv-player-hint">
-          确定键 暂停/播放 · 左右键 快退/快进 · 返回键 选集
-        </div>
-      )}
     </div>
   );
 }
 
 export default function App() {
-  const isTv = document.body.classList.contains("tv-body");
   const [section, setSection] = useState<
     "home" | "custom" | "search" | "history"
   >("home");
@@ -887,7 +868,6 @@ export default function App() {
     readStorage<string[]>("recent-searches", []),
   );
   const [showRecentSearches, setShowRecentSearches] = useState(false);
-  const [tvPlayerFullscreen, setTvPlayerFullscreen] = useState(false);
   const [searched, setSearched] = useState("");
   const [results, setResults] = useState<SearchItem[]>([]);
   const [failed, setFailed] = useState<string[]>([]);
@@ -949,7 +929,6 @@ export default function App() {
 
   // 窄屏退出动画期间保留页面；其余设备和减少动态效果设置立即返回。
   const animatePageExit = () =>
-    !isTv &&
     window.videoAPI.platform === "android" &&
     window.matchMedia(
       "(max-width: 700px) and (prefers-reduced-motion: no-preference)",
@@ -1003,7 +982,7 @@ export default function App() {
     enabledSources[0];
 
   useEffect(() => {
-    if (window.videoAPI.platform !== "android" || isTv) return;
+    if (window.videoAPI.platform !== "android") return;
     const viewport = window.visualViewport;
     let fullHeight = Math.min(viewport?.height ?? window.innerHeight, window.innerHeight);
     let width = viewport?.width ?? window.innerWidth;
@@ -1034,7 +1013,7 @@ export default function App() {
       document.removeEventListener("focusout", updateKeyboard);
       document.body.classList.remove("keyboard-open");
     };
-  }, [isTv]);
+  }, []);
 
   useEffect(() => {
     if (window.videoAPI.platform !== "android") return;
@@ -1042,8 +1021,7 @@ export default function App() {
     let remove: (() => void) | undefined;
     // 安卓端隐藏页面返回按钮后，由系统返回键完成相同的资源清理。
     const goBack = () => {
-      if (tvPlayerFullscreen) setTvPlayerFullscreen(false);
-      else if (playerInstance.current?.fullscreenWeb)
+      if (playerInstance.current?.fullscreenWeb)
         playerInstance.current.fullscreenWeb = false;
       else if (sourceFormatOpen) setSourceFormatOpen(false);
       else if (castOpen) setCastOpen(false);
@@ -1070,27 +1048,11 @@ export default function App() {
         else listener.remove();
       });
     }
-    // 部分电视遥控器将返回键送为网页 Escape/Backspace，而非 Android backButton。
-    const onTvBack = (event: KeyboardEvent) => {
-      if (!document.body.classList.contains("tv-body")) return;
-      if (event.key !== "Escape" && event.key !== "Backspace") return;
-      if (
-        event.key === "Backspace" &&
-        (event.target instanceof HTMLInputElement ||
-          event.target instanceof HTMLTextAreaElement)
-      )
-        return;
-      event.preventDefault();
-      goBack();
-    };
-    document.addEventListener("keydown", onTvBack);
     return () => {
       active = false;
       remove?.();
-      document.removeEventListener("keydown", onTvBack);
     };
   }, [
-    tvPlayerFullscreen,
     sourceFormatOpen,
     castOpen,
     settingsOpen,
@@ -1105,131 +1067,6 @@ export default function App() {
     episode,
     section,
   ]);
-
-  useEffect(() => {
-    if (!isTv) return;
-    // 电视选集后直接进入沉浸播放；返回键先退回线路和选集页面。
-    setTvPlayerFullscreen(episode !== null && selected !== null);
-  }, [isTv, episode, selected]);
-
-  useEffect(() => {
-    if (!tvPlayerFullscreen) return;
-    const frame = requestAnimationFrame(() => {
-      const player = document.querySelector<HTMLElement>(".tv-fullscreen");
-      if (player) focusTvElement(player);
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [tvPlayerFullscreen, episode, detail]);
-
-  useEffect(() => {
-    if (!document.body.classList.contains("tv-body")) return;
-    const onTvKeyDown = (event: KeyboardEvent) => {
-      const player = playerInstance.current;
-      if (
-        ["MediaPlayPause", "MediaPlay", "MediaPause"].includes(event.key) &&
-        player
-      ) {
-        event.preventDefault();
-        if (
-          event.key === "MediaPause" ||
-          (event.key === "MediaPlayPause" && !player.video.paused)
-        )
-          player.video.pause();
-        else void player.video.play().catch(() => {});
-        return;
-      }
-      const target = event.target as HTMLElement;
-      if (
-        event.key === "Enter" &&
-        target instanceof HTMLInputElement &&
-        target.type === "checkbox"
-      ) {
-        event.preventDefault();
-        target.click();
-        return;
-      }
-      if (target.matches(".video-shell") && player) {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          if (player.video.paused) void player.video.play().catch(() => {});
-          else player.video.pause();
-          return;
-        }
-        if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-          event.preventDefault();
-          player.currentTime = Math.max(
-            0,
-            Math.min(
-              player.duration || Infinity,
-              player.currentTime + (event.key === "ArrowRight" ? 10 : -10),
-            ),
-          );
-          return;
-        }
-      }
-      if (
-        !["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)
-      )
-        return;
-      if (
-        (target instanceof HTMLInputElement ||
-          target instanceof HTMLTextAreaElement) &&
-        (event.key === "ArrowLeft" || event.key === "ArrowRight")
-      )
-        return;
-      const scope =
-        document.querySelector(".tv-fullscreen") ||
-        document.querySelector(".source-format-backdrop .cast-modal") ||
-        document.querySelector(".modal-backdrop .cast-modal") ||
-        document.querySelector(".settings-drawer") ||
-        document.querySelector(".detail-overlay") ||
-        document.querySelector(".search-box.history-open") ||
-        document.querySelector(".app-shell");
-      if (!scope) return;
-      event.preventDefault();
-      moveTvFocus(scope, event.key);
-    };
-    document.addEventListener("keydown", onTvKeyDown, true);
-    return () => document.removeEventListener("keydown", onTvKeyDown, true);
-  }, []);
-
-  useEffect(() => {
-    if (!document.body.classList.contains("tv-body")) return;
-    const frame = requestAnimationFrame(() => {
-      const scope =
-        document.querySelector(".source-format-backdrop .cast-modal") ||
-        document.querySelector(".modal-backdrop .cast-modal") ||
-        document.querySelector(".settings-drawer") ||
-        document.querySelector(".detail-overlay");
-      if (!scope) return;
-      if (scope.contains(document.activeElement)) return;
-      const preferred =
-        scope.querySelector<HTMLElement>("[data-tv-autofocus]") ||
-        scope.querySelector<HTMLElement>("button:not(:disabled)");
-      if (preferred) focusTvElement(preferred);
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [
-    selected,
-    detailLoading,
-    episode,
-    settingsOpen,
-    sourceFormatOpen,
-    castOpen,
-  ]);
-
-  useEffect(() => {
-    if (!isTv || section !== "search" || !results.length || selected) return;
-    // 从最近搜索或海报进入结果页时，原按钮已卸载，焦点落到第一张海报。
-    const frame = requestAnimationFrame(() => {
-      if (document.activeElement !== document.body) return;
-      const first = document.querySelector<HTMLElement>(
-        ".search-results .poster-card",
-      );
-      if (first) focusTvElement(first);
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [isTv, section, results.length, selected]);
 
   useEffect(() => {
     if (!showRecentSearches) return;
@@ -2188,12 +2025,6 @@ export default function App() {
                       setRecentSearches([]);
                       saveStorage("recent-searches", []);
                       setShowRecentSearches(false);
-                      if (isTv)
-                        requestAnimationFrame(() =>
-                          searchBox.current
-                            ?.querySelector<HTMLInputElement>("input")
-                            ?.focus(),
-                        );
                     }}
                   >
                     清空记录
@@ -2216,28 +2047,12 @@ export default function App() {
                         aria-label={`删除搜索记录 ${term}`}
                         title={`删除 ${term}`}
                         onClick={() => {
-                          const index = recentSearches.indexOf(term);
                           const next = recentSearches.filter(
                             (item) => item !== term,
                           );
                           setRecentSearches(next);
                           saveStorage("recent-searches", next);
                           if (!next.length) setShowRecentSearches(false);
-                          if (isTv)
-                            requestAnimationFrame(() => {
-                              const buttons =
-                                searchBox.current?.querySelectorAll<HTMLElement>(
-                                  ".recent-search-delete",
-                                );
-                              if (buttons?.length)
-                                focusTvElement(
-                                  buttons[Math.min(index, buttons.length - 1)],
-                                );
-                              else
-                                searchBox.current
-                                  ?.querySelector<HTMLInputElement>("input")
-                                  ?.focus();
-                            });
                         }}
                       >
                         <X size={15} />
@@ -3017,7 +2832,6 @@ export default function App() {
                         )}
                         <button
                           className="primary-button"
-                          data-tv-autofocus
                           onClick={() => {
                             failedLines.current.clear();
                             fallbackPosition.current = null;
@@ -3111,7 +2925,6 @@ export default function App() {
                                 return false;
                               }}
                               playerInstance={playerInstance}
-                              tvFullscreen={tvPlayerFullscreen}
                             />
                           )}
                           <div className="player-title">
@@ -3123,18 +2936,9 @@ export default function App() {
                             </div>
                             {!casting && (
                               <div className="player-actions">
-                                {isTv && (
-                                  <button
-                                    onClick={() => setTvPlayerFullscreen(true)}
-                                  >
-                                    <Maximize2 size={17} /> 全屏播放
-                                  </button>
-                                )}
-                                {!isTv && (
-                                  <button onClick={scanDevices}>
-                                    <MonitorPlay size={17} /> 投屏
-                                  </button>
-                                )}
+                                <button onClick={scanDevices}>
+                                  <MonitorPlay size={17} /> 投屏
+                                </button>
                                 {episode + 1 <
                                   detail.lines[line].episodes.length && (
                                   <button

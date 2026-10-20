@@ -1,6 +1,6 @@
 # 影窗
 
-Windows / macOS 桌面与 Android 手机、平板、电视点播客户端。电影、电视剧和综艺推荐来自豆瓣，番剧榜单来自 Bangumi。初次安装不内置点播源，需要在「播放设置」中粘贴 VOD 订阅地址并导入，例如[这份 vod.json 源清单](https://raw.githubusercontent.com/johnshuxian/IPTVM3U/refs/heads/master/vod.json)。
+Windows / macOS 桌面、Android 手机和平板，以及独立原生 Android 电视点播客户端。电影、电视剧和综艺推荐来自豆瓣，番剧榜单来自 Bangumi。初次安装不内置点播源，需要在「播放设置」中粘贴 VOD 订阅地址并导入，例如[这份 vod.json 源清单](https://raw.githubusercontent.com/johnshuxian/IPTVM3U/refs/heads/master/vod.json)。
 
 ## 功能
 
@@ -40,9 +40,17 @@ Android 版需要 JDK 21、Android SDK Platform 36 和 Build Tools 35.0.0。在 
 npm run dist:android
 ```
 
-调试签名 APK 输出到 `android/app/build/outputs/apk/debug/app-debug.apk`，可安装到 Android 手机、平板和电视。安卓端在原生 SQLite 中保存设置和播放记录，支持跟随设备旋转、手机端顶部分类与底部四入口、本机播放和 DLNA 投屏。手机与电视需连接同一局域网，电视需支持并开启 DLNA 视频接收。桌面版数据库不会自动同步到安卓端，首次使用需重新导入点播源。
+调试签名 APK 输出到 `android/app/build/outputs/apk/debug/app-debug.apk`，可安装到 Android 手机、平板。安卓端在原生 SQLite 中保存设置和播放记录，支持跟随设备旋转、手机端顶部分类与底部四入口、本机播放和 DLNA 投屏。手机与电视需连接同一局域网，电视需支持并开启 DLNA 视频接收。桌面版数据库不会自动同步到安卓端，首次使用需重新导入点播源。
 
-同一 APK 也可安装在 Android TV / Google TV 上，电视桌面会显示「影窗」入口。电视端使用方向键移动焦点、确定键选择；播放时确定键暂停或继续，左右键各快退或快进 10 秒，返回键先退出全屏并回到选集。搜索框会在各端分别保存最近 10 条搜索，可点选重搜、逐条删除或清空；记录保存在各设备本地，不跨设备同步。电视端播放仍取决于设备 WebView、解码能力和所选线路，建议在目标电视上实测。
+搜索框会在各端分别保存最近 10 条搜索，可点选重搜、逐条删除或清空；记录保存在各设备本地，不跨设备同步。
+
+### 原生 Android 电视端
+
+`android-tv/` 是独立的 Kotlin / Compose 电视应用，不依赖手机端 WebView，最低支持 Android 8.0（API 26），包名为 `com.shuxian.videoclient.tv`，可与手机端同时安装。电视首页顶部为搜索框和设置，下面是电影、电视、综艺、自定义和播放记录菜单。电影和电视保留豆瓣推荐分类标签，综艺沿用豆瓣综艺推荐；自定义菜单保留点播源返回的父分类和子分类。
+
+首次使用在设置中填写 `vod.json` 订阅地址并导入。自定义菜单默认使用第一个已启用的非限制源，也可以在设置中选择其他源；搜索会查询所有已启用的非限制源。设置中不提供并发数输入，搜索内部最多同时请求 6 个源。列表向下翻时自动加载下一页，顶部菜单随列表滚动，返回键可直接回到当前列表顶部。详情页支持选择线路和集数，使用 Media3 原生播放器播放 HLS / MP4；遥控器左右键每次快退或快进 20 秒，播放器内可切换线路、选集和播放下一集，当前线路失败时会尝试同集的其他线路。播放记录保存在电视本机，可继续播放或删除；继续播放会先读取本机缓存的线路和集数，再在后台更新详情，记录卡片显示观看进度。播放器中遥控器返回键回到选集。电视端设置与播放记录不与手机或桌面同步。
+
+需要 JDK 21、Android SDK Platform 36 和 Build Tools 35.0.0。在 Windows 上运行 `npm run dist:android-tv`，调试 APK 输出到 `android-tv/app/build/outputs/apk/debug/app-debug.apk`。发布标签的 GitHub Actions 也会生成 `videoClient-vX.Y.Z-android-tv.apk`。
 
 ### HarmonyOS 7 适配工程
 
@@ -62,7 +70,7 @@ API 26 工程已通过 DevEco Studio 26.0.0 编译与调试签名；真机已验
 
 安装包输出到 `release/`。字体文件随安装包提供，不需要启动时连接 Google Fonts。macOS 发布给其他电脑时，需要按 Apple 的要求签名和公证。首页数据和点播资源都依赖相应的第三方服务；个别线路失效时，可以在搜索结果中换源。接收设备需支持对应的投屏协议，并能自行访问视频源地址。
 Windows 安装包使用安装向导，可在安装时选择目录。
-发布新版本时，先更新 `package.json` 的版本号，再推送对应的 `vX.Y.Z` 标签。GitHub Actions 会构建 Windows x64 安装包、Apple Silicon（ARM64）macOS DMG、Android 正式签名 APK 和 HarmonyOS 签名 HAP，并发布到 GitHub Releases。文件名分别为 `videoClient-vX.Y.Z-windows-x64.exe`、`videoClient-vX.Y.Z-macos-arm64.dmg`、`videoClient-vX.Y.Z-android.apk` 和 `videoClient-vX.Y.Z-harmony.hap`，也可在运行记录的 Artifacts 中下载。桌面端 CI 产物未签名；向其他 Mac 分发前仍需配置 Apple 签名和公证。
+发布新版本时，先更新 `package.json` 的版本号，再推送对应的 `vX.Y.Z` 标签。GitHub Actions 会构建 Windows x64 安装包、Apple Silicon（ARM64）macOS DMG、Android 手机 APK、原生 Android 电视 APK 和 HarmonyOS 签名 HAP，并发布到 GitHub Releases。文件名分别为 `videoClient-vX.Y.Z-windows-x64.exe`、`videoClient-vX.Y.Z-macos-arm64.dmg`、`videoClient-vX.Y.Z-android.apk`、`videoClient-vX.Y.Z-android-tv.apk` 和 `videoClient-vX.Y.Z-harmony.hap`，也可在运行记录的 Artifacts 中下载。桌面端 CI 产物未签名；向其他 Mac 分发前仍需配置 Apple 签名和公证。
 
 GitHub 仓库的 Actions Secrets 需要配置 `ANDROID_KEYSTORE_BASE64`（同一份 JKS 密钥库的 Base64 内容）和 `ANDROID_KEYSTORE_PASSWORD`。工作流只在构建签名版 APK 时读取它们，并核对证书 SHA-256 指纹 `7F:98:3E:F3:2A:1B:69:A8:4E:D1:94:79:78:13:E1:88:C4:66:DD:BC:CE:E1:A7:43:89:0C:6F:36:B5:58:FE:D1`；密钥缺失或签名不一致时直接失败，避免再次发布不同签名的 APK。请在仓库外备份原始 JKS 和密码，后续版本必须继续使用同一密钥。本地 `npm run dist:android` 仍生成调试签名 APK；旧版 GitHub 调试签名 APK 无法用新正式签名直接覆盖安装，需要先卸载一次。
 
@@ -70,13 +78,13 @@ GitHub 仓库的 Actions Secrets 需要配置 `ANDROID_KEYSTORE_BASE64`（同一
 
 鸿蒙任务使用带 `harmony` 标签的 Windows x64 自托管 Runner。到仓库 **Settings → Actions → Runners → New self-hosted runner**，按 GitHub 给出的 Windows 命令安装并启动 Runner，添加 `harmony` 标签。Runner 需要 PowerShell 7、DevEco Studio 26 和 HarmonyOS API 26 SDK；工作流默认从 `E:\mysoft\DevEco Studio` 调用工具。若 Runner 装在其他机器，请先修改工作流中的 `DEVECO_HOME`。Runner 必须保持在线，鸿蒙任务才能开始。
 
-在这台电脑的 PowerShell 7 中运行以下命令。脚本会把当前 `.p12`、配套的 `.cer` 和 `.p7b`、DevEco 密码加密所需的 `material` 目录，以及本机未纳入版本控制的签名配置打包，并将 Base64 内容复制到剪贴板：
+本机鸿蒙签名材料保存在仓库根目录的 `harmony-signing/`（已加入 Git 忽略）。在这台电脑的 PowerShell 7 中运行以下命令，脚本会把 `.p12`、配套的 `.cer` 和 `.p7b`、DevEco 密码加密所需的 `material` 目录，以及本机签名配置打包，并将 Base64 内容复制到剪贴板：
 
 ```powershell
-.\scripts\export-harmony-signing.ps1 -StoreFile 'C:\Users\zhang\.ohos\config\default_harmony_VAi7LMTYvejwjYVB_cXQhifgVj8aRd39jNb_tzpaozg=.p12'
+.\scripts\export-harmony-signing.ps1 -StoreFile '.\harmony-signing\signing.p12'
 ```
 
-到仓库 **Settings → Secrets and variables → Actions → New repository secret**，添加 `HARMONY_SIGNING_BUNDLE_BASE64`，粘贴剪贴板内容。请勿将签名包、Base64 或本机 `harmony/build-profile.json5` 提交到仓库。以后换构建机时，仍需使用同一套签名材料；可在新机器重新导出，并更新这一项 Secret。
+到仓库 **Settings → Secrets and variables → Actions → New repository secret**，添加 `HARMONY_SIGNING_BUNDLE_BASE64`，粘贴剪贴板内容。请勿将 `harmony-signing/`、Base64 或本机 `harmony/build-profile.json5` 提交到仓库。以后换构建机时，仍需使用同一套签名材料；可在新机器重新导出，并更新这一项 Secret。
 
 CI 会校验 `.cer` 的 SHA-256 为 `50599d171bf509a40dfa214b5bcd366b2b6ff9c762aa67781a600b8b79c4c5c6`，不一致就停止构建，避免发布无法覆盖当前安装版的 HAP。当前使用的自动调试签名配置通常只允许已登记的设备安装；若要面向所有设备分发，需先在华为开发者平台申请正式发布签名，这会涉及签名迁移。本工作流也支持在 Actions 页面手动运行，手动运行只上传构建产物，不创建 GitHub Release。
 

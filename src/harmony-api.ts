@@ -96,7 +96,6 @@ export async function createHarmonyVideoAPI(): Promise<Window["videoAPI"]> {
       },
     },
     statusBar: {
-      deviceInfo: async () => ({ isTv: false }),
       setTheme: ({ theme }) => call<void>({ action: "setTheme", theme }),
       setFullscreen: ({ fullscreen }) => call<void>({ action: "setFullscreen", fullscreen }),
       getBrightness: async () => ({ brightness: await call<number>({ action: "getBrightness" }) }),
