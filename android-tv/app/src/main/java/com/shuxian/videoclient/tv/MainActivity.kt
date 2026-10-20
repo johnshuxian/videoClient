@@ -50,6 +50,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableLongStateOf
@@ -180,8 +181,11 @@ private fun TvApp(onExit: () -> Unit) {
     var settingsError by remember { mutableStateOf("") }
     var settingsMessage by remember { mutableStateOf("") }
     val browseGridState = rememberLazyGridState()
-    val firstFilterFocus = remember { FocusRequester() }
-    val firstChildFocus = remember { FocusRequester() }
+    val browseGridColumns by remember { derivedStateOf { browseGridState.layoutInfo.maxSpan } }
+    // 遥控器跨行返回当前选中的标签，不让空间距离决定落到哪个分类。
+    val selectedFilterFocus = remember { FocusRequester() }
+    val selectedParentFocus = remember { FocusRequester() }
+    val selectedChildFocus = remember { FocusRequester() }
     val firstPosterFocus = remember { FocusRequester() }
     val searchFieldFocus = remember { FocusRequester() }
     val settingsImportFocus = remember { FocusRequester() }
@@ -433,8 +437,11 @@ private fun TvApp(onExit: () -> Unit) {
         }
     }
 
-    val listIsScrolled = (screen == "browse" || screen == "search") &&
-        (browseGridState.firstVisibleItemIndex > 0 || browseGridState.firstVisibleItemScrollOffset > 0)
+    // 滚动偏移每帧都会变化，只有“是否离开顶部”发生变化时才让整个页面重组。
+    val gridIsScrolled by remember(browseGridState) {
+        derivedStateOf { browseGridState.firstVisibleItemIndex > 0 || browseGridState.firstVisibleItemScrollOffset > 0 }
+    }
+    val listIsScrolled = (screen == "browse" || screen == "search") && gridIsScrolled
     // 首页首次返回只提示，短时间内再次返回才退出；离开首页或继续操作会取消提示。
     LaunchedEffect(exitPromptUntil) {
         if (exitPromptUntil != 0L) {
@@ -587,7 +594,7 @@ private fun TvApp(onExit: () -> Unit) {
                         }
                         Spacer(Modifier.height(22.dp))
                         val episodes = current.lines.getOrNull(lineIndex)?.episodes.orEmpty()
-                        FocusButton("立刻播放", selected = true, enabled = episodes.isNotEmpty(), modifier = Modifier.focusRequester(detailPlayFocus), onClick = {
+                        FocusButton("立刻播放", selected = true, enabled = episodes.isNotEmpty(), tab = true, modifier = Modifier.focusRequester(detailPlayFocus), onClick = {
                             val saved = history.firstOrNull { it.key == selectedVideo?.let { video -> "${video.sourceUrl}:${video.id}" } }
                             val matched = saved?.let { matchingEpisode(current, it.lineName, it.lineIndex, it.episodeLabel, it.episodeIndex) }
                             if (matched != null) play(matched.second, matched.first, startPositionMs = saved?.positionMs ?: 0L)
@@ -596,19 +603,21 @@ private fun TvApp(onExit: () -> Unit) {
                         Spacer(Modifier.height(18.dp))
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             Label("选集", 20, white, Modifier.weight(1f), bold = true)
-                            FocusButton("正序", selected = !episodeDescending, onClick = { episodeDescending = false })
-                            FocusButton("倒序", selected = episodeDescending, onClick = { episodeDescending = true })
+                            FocusButton("正序", selected = !episodeDescending, tab = true, onClick = { episodeDescending = false })
+                            FocusButton("倒序", selected = episodeDescending, tab = true, onClick = { episodeDescending = true })
                         }
                         Spacer(Modifier.height(10.dp))
                         if (episodes.isEmpty()) Label("该资源没有可播放地址", 18, muted)
                         else LazyVerticalGrid(
                             columns = GridCells.Adaptive(132.dp),
+                            // 焦点放大时为首尾按钮留出空间，避免白色描边被网格裁掉。
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp),
                             modifier = Modifier.weight(1f),
                         ) {
                             items(if (episodeDescending) episodes.indices.reversed().toList() else episodes.indices.toList()) { index ->
-                                FocusButton(episodes[index].label, onClick = { play(index, lineIndex) })
+                                FocusButton(episodes[index].label, tab = true, onClick = { play(index, lineIndex) })
                             }
                         }
                     }
@@ -707,6 +716,9 @@ private fun TvApp(onExit: () -> Unit) {
             }
             else -> {
                 // 搜索、菜单和海报共用一个纵向网格，向下翻页时顶部会自然滚出屏幕。
+                val selectedCustomChild = categories.firstOrNull { it.id == categoryId }?.let { child ->
+                    categories.any { it.id == child.parentId }
+                } == true
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(170.dp),
                     state = browseGridState,
@@ -753,7 +765,8 @@ private fun TvApp(onExit: () -> Unit) {
                                         label, selected = screen == "browse" && section == value, tab = true,
                                         modifier = Modifier.focusRequester(menuFocus.getValue(value)).focusProperties {
                                             // 有筛选项就进入筛选；综艺没有筛选项，直接进入第一张海报。
-                                            if (section == "movie" || section == "tv" || section == "custom" && selectedSource != null) down = firstFilterFocus
+                                            if (section == "movie" || section == "tv") down = selectedFilterFocus
+                                            else if (section == "custom" && selectedSource != null) down = selectedParentFocus
                                             else if (section == "variety" && catalog.isNotEmpty()) down = firstPosterFocus
                                         },
                                         onFocus = {
@@ -858,14 +871,20 @@ private fun TvApp(onExit: () -> Unit) {
                                 Spacer(Modifier.height(12.dp))
                                 if (section == "movie" || section == "tv") {
                                     key(section) {
-                                        LazyRow(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                                        // 横向列表会裁切放大的焦点框，首尾和上下都预留一点空间。
+                                        LazyRow(
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(9.dp),
+                                        ) {
                                             items(if (section == "movie") movieTags else tvTags) { name ->
                                                 val chooseTag = {
                                                     if (tag != name) { tag = name; page = 0; catalog = emptyList(); hasMore = true }
                                                 }
                                                 FocusButton(
                                                     name, selected = tag == name, tab = true,
-                                                    modifier = if (name == "热门") Modifier.focusRequester(firstFilterFocus).focusProperties { up = menuFocus.getValue(lastFocusedMenu) } else Modifier,
+                                                    modifier = Modifier
+                                                        .then(if (tag == name) Modifier.focusRequester(selectedFilterFocus) else Modifier)
+                                                        .focusProperties { up = menuFocus.getValue(lastFocusedMenu) },
                                                     onFocus = { selectOnRemoteFocus(chooseTag) }, onClick = chooseTag,
                                                 )
                                             }
@@ -877,10 +896,17 @@ private fun TvApp(onExit: () -> Unit) {
                                     val active = categories.firstOrNull { it.id == categoryId }
                                     val parentId = active?.parentId?.takeIf { id -> categories.any { it.id == id } } ?: categoryId
                                     val children = categories.filter { it.parentId == parentId }
-                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                                    LazyRow(
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(9.dp),
+                                    ) {
                                         item {
                                             val chooseAll = { if (categoryId != null) { categoryId = null; page = 0; videos = emptyList() } }
-                                            FocusButton("全部", selected = categoryId == null, tab = true, modifier = Modifier.focusRequester(firstFilterFocus).focusProperties { up = menuFocus.getValue(lastFocusedMenu) }, onFocus = { selectOnRemoteFocus(chooseAll) }, onClick = chooseAll)
+                                            FocusButton("全部", selected = categoryId == null, tab = true,
+                                                modifier = Modifier
+                                                    .then(if (categoryId == null) Modifier.focusRequester(selectedParentFocus) else Modifier)
+                                                    .focusProperties { up = menuFocus.getValue(lastFocusedMenu) },
+                                                onFocus = { selectOnRemoteFocus(chooseAll) }, onClick = chooseAll)
                                         }
                                         items(roots) { category ->
                                             val chooseCategory = {
@@ -891,7 +917,12 @@ private fun TvApp(onExit: () -> Unit) {
                                             }
                                             FocusButton(
                                                 category.name, selected = parentId == category.id, tab = true,
-                                                modifier = if (children.isNotEmpty()) Modifier.focusProperties { down = firstChildFocus } else Modifier,
+                                                modifier = Modifier
+                                                    .then(if (parentId == category.id) Modifier.focusRequester(selectedParentFocus) else Modifier)
+                                                    .focusProperties {
+                                                        up = menuFocus.getValue(lastFocusedMenu)
+                                                        if (children.isNotEmpty()) down = selectedChildFocus
+                                                    },
                                                 onFocus = { selectOnRemoteFocus(chooseCategory) }, onClick = chooseCategory,
                                             )
                                         }
@@ -899,12 +930,17 @@ private fun TvApp(onExit: () -> Unit) {
                                     if (children.isNotEmpty()) {
                                         Spacer(Modifier.height(10.dp))
                                         key(parentId) {
-                                            LazyRow(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                                            LazyRow(
+                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(9.dp),
+                                            ) {
                                                 items(children) { category ->
                                                     val chooseChild = { if (categoryId != category.id) { categoryId = category.id; page = 0; videos = emptyList() } }
                                                     FocusButton(
                                                         category.name, selected = categoryId == category.id, tab = true,
-                                                        modifier = if (category.id == children.first().id) Modifier.focusRequester(firstChildFocus) else Modifier,
+                                                        modifier = Modifier
+                                                            .then(if (categoryId == category.id) Modifier.focusRequester(selectedChildFocus) else Modifier)
+                                                            .focusProperties { up = selectedParentFocus },
                                                         onFocus = { selectOnRemoteFocus(chooseChild) }, onClick = chooseChild,
                                                     )
                                                 }
@@ -922,13 +958,21 @@ private fun TvApp(onExit: () -> Unit) {
                             }
                         }
                         if (section == "custom") {
-                            items(videos, key = { "${it.sourceUrl}:${it.id}" }) { video ->
-                                PosterCard(video.title, video.poster, listOf(video.sourceName, video.remarks).filter { it.isNotBlank() }.joinToString(" · "), repository, onFocus = { usedNavigationToken = navigationToken }) { openDetail(video) }
+                            itemsIndexed(videos, key = { _, video -> "${video.sourceUrl}:${video.id}" }) { index, video ->
+                                PosterCard(video.title, video.poster, listOf(video.sourceName, video.remarks).filter { it.isNotBlank() }.joinToString(" · "), repository,
+                                    modifier = if (index < browseGridColumns) Modifier.focusProperties {
+                                        up = if (selectedCustomChild) selectedChildFocus else selectedParentFocus
+                                    } else Modifier,
+                                    onFocus = { usedNavigationToken = navigationToken }) { openDetail(video) }
                             }
                         } else {
                             itemsIndexed(catalog) { index, video ->
                                 PosterCard(video.title, video.poster, video.rating.takeIf { it.isNotBlank() }?.let { "★ $it" } ?: video.info, repository,
-                                    modifier = if (section == "variety" && index == 0) Modifier.focusRequester(firstPosterFocus).focusProperties { up = menuFocus.getValue(lastFocusedMenu) } else Modifier,
+                                    modifier = when {
+                                        section == "variety" && index == 0 -> Modifier.focusRequester(firstPosterFocus).focusProperties { up = menuFocus.getValue(lastFocusedMenu) }
+                                        section != "variety" && index < browseGridColumns -> Modifier.focusProperties { up = selectedFilterFocus }
+                                        else -> Modifier
+                                    },
                                     onFocus = { usedNavigationToken = navigationToken }) { search(video.title) }
                             }
                         }

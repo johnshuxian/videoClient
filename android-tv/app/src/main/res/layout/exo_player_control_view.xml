@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Media3 会按此同名布局创建控制层；中央留空，只保留遥控器下键打开的底栏。 -->
+<!-- Media3 只绘制进度与其他底栏控件；播放状态图标由 Compose 在画面中央绘制。 -->
 <merge xmlns:android="http://schemas.android.com/apk/res/android">
 
     <View
@@ -45,7 +45,6 @@
             android:layout_gravity="center_vertical|end"
             android:layoutDirection="ltr">
 
-            <ImageButton android:id="@id/exo_play_pause" style="@style/ExoStyledControls.Button.Center.PlayPause" />
             <ImageButton android:id="@id/exo_vr" style="@style/ExoStyledControls.Button.Bottom.VR" />
             <ImageButton android:id="@id/exo_shuffle" style="@style/ExoStyledControls.Button.Bottom.Shuffle" />
             <ImageButton android:id="@id/exo_repeat_toggle" style="@style/ExoStyledControls.Button.Bottom.RepeatToggle" />

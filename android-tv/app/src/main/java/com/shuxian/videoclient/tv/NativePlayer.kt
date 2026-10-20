@@ -1,8 +1,14 @@
 package com.shuxian.videoclient.tv
 
+import android.app.Activity
+import android.content.Context
+import android.media.AudioManager
 import android.net.Uri
+import android.provider.Settings
 import android.text.format.DateUtils
+import android.view.GestureDetector
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.view.Gravity
 import android.widget.ImageButton
@@ -13,6 +19,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -72,6 +79,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 @Composable
 @androidx.annotation.OptIn(UnstableApi::class)
@@ -91,6 +100,8 @@ fun NativePlayer(
     onPlaybackFailure: (reason: String, positionMs: Long) -> Unit,
 ) {
     val context = LocalContext.current
+    val activity = context as Activity
+    val audioManager = remember(context) { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val view = LocalView.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
@@ -100,6 +111,8 @@ fun NativePlayer(
     var playbackPaused by remember(url) { mutableStateOf(false) }
     var showPlayFeedback by remember(url) { mutableStateOf(false) }
     var seekFeedback by remember(url) { mutableStateOf("") }
+    var heldSpeed by remember(url) { mutableStateOf<Float?>(null) }
+    var wasPlayingBeforeHold by remember(url) { mutableStateOf(false) }
     var seekActivity by remember(url) { mutableIntStateOf(0) }
     var seekStartPositionMs by remember(url) { mutableLongStateOf(-1L) }
     var lastRemoteSeekMs by remember(url) { mutableLongStateOf(0L) }
@@ -138,8 +151,16 @@ fun NativePlayer(
                 playWhenReady = lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
             }
     }
+    val originalBrightness = remember(player) { activity.window.attributes.screenBrightness }
 
     LaunchedEffect(player, playbackSpeed) { player.setPlaybackSpeed(playbackSpeed) }
+
+    fun stopFastForward() {
+        val previousSpeed = heldSpeed ?: return
+        heldSpeed = null
+        player.setPlaybackSpeed(previousSpeed)
+        if (!wasPlayingBeforeHold) player.pause()
+    }
 
     fun reportPosition() {
         if (player.playbackState == Player.STATE_READY && player.currentPosition >= 0L) {
@@ -178,9 +199,9 @@ fun NativePlayer(
                 if (controllerVisible) {
                     val progress = playerView?.findViewById<View>(androidx.media3.ui.R.id.exo_progress)
                     if (playerView?.findFocus() === progress) {
-                        // Media3 进度条会吃掉下键；明确移到下方按钮，避免焦点看似没有移动。
+                        // Media3 进度条会吃掉下键；明确移到底栏的倍速按钮。
                         if (event.action == KeyEvent.ACTION_DOWN) {
-                            playerView?.findViewById<View>(androidx.media3.ui.R.id.exo_play_pause)?.requestFocus()
+                            playerView?.findViewWithTag<View>("speed_control")?.requestFocus()
                         }
                         return true
                     }
@@ -192,7 +213,7 @@ fun NativePlayer(
                     playerView?.post {
                         val progress = playerView?.findViewById<View>(androidx.media3.ui.R.id.exo_progress)
                         if (progress?.requestFocus() != true) {
-                            playerView?.findViewById<View>(androidx.media3.ui.R.id.exo_play_pause)?.requestFocus()
+                            playerView?.findViewWithTag<View>("speed_control")?.requestFocus()
                         }
                     }
                 }
@@ -256,7 +277,7 @@ fun NativePlayer(
         // 播放页持有原生解码器；退出选集时立即释放，避免后台继续占用电视资源。
         val listener = object : Player.Listener {
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-                // 暂停图标常驻；恢复播放时短暂提示一次播放状态。
+                // 中央图标显示当前状态：暂停时常驻，恢复播放时短暂提示。
                 if (playWhenReady && playbackPaused) showPlayFeedback = true
                 if (!playWhenReady) showPlayFeedback = false
                 playbackPaused = !playWhenReady
@@ -281,9 +302,12 @@ fun NativePlayer(
             }
         }
         player.addListener(listener)
+        playbackPaused = !player.playWhenReady
         view.keepScreenOn = true
         onDispose {
+            stopFastForward()
             view.keepScreenOn = false
+            activity.window.attributes = activity.window.attributes.apply { screenBrightness = originalBrightness }
             player.removeListener(listener)
             player.release()
         }
@@ -294,6 +318,7 @@ fun NativePlayer(
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_PAUSE) {
                 reportPosition()
+                stopFastForward()
                 player.pause()
             }
         }
@@ -345,7 +370,8 @@ fun NativePlayer(
     }
     LaunchedEffect(player) {
         while (isActive) {
-            delay(3_000)
+            // 底栏进度由 Media3 自己刷新；续播记录每 15 秒保存一次，退出和暂停时另行即时保存。
+            delay(15_000)
             if (player.isPlaying) reportPosition()
         }
     }
@@ -354,6 +380,114 @@ fun NativePlayer(
         AndroidView(
             factory = {
                 object : PlayerView(it) {
+                    private var handleVideoGesture = false
+                    private var gestureMode = 0 // 0 待判定，1 横向跳转，2 亮度，3 音量，4 忽略，5 长按倍速。
+                    private var startBrightness = 0f
+                    private var appliedBrightness = -1f
+                    private var startVolume = 0
+                    private var appliedVolume = -1
+                    private val gestureThreshold = 48f * resources.displayMetrics.density
+                    private val gestures = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+                        override fun onDown(event: MotionEvent): Boolean = true
+
+                        override fun onDoubleTap(event: MotionEvent): Boolean {
+                            if (player.playWhenReady) player.pause() else player.play()
+                            return true
+                        }
+
+                        override fun onSingleTapConfirmed(event: MotionEvent): Boolean {
+                            if (isControllerFullyVisible) hideController() else showController()
+                            return true
+                        }
+
+                        override fun onLongPress(event: MotionEvent) {
+                            // 仅右侧静止长按启动倍速；滑动一旦开始就不再切换手势。
+                            if (gestureMode != 0 || event.x <= width * .72f || heldSpeed != null) return
+                            gestureMode = 5
+                            wasPlayingBeforeHold = player.playWhenReady
+                            heldSpeed = player.playbackParameters.speed
+                            player.setPlaybackSpeed(2f)
+                            if (!wasPlayingBeforeHold) player.play()
+                        }
+
+                        override fun onScroll(start: MotionEvent?, current: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
+                            if (start == null || gestureMode == 4 || gestureMode == 5) return true
+                            val dx = current.x - start.x
+                            val dy = current.y - start.y
+                            if (gestureMode == 0) {
+                                if (abs(dx) < gestureThreshold && abs(dy) < gestureThreshold) return true
+                                gestureMode = when {
+                                    abs(dx) > abs(dy) * 1.5f -> 1
+                                    abs(dy) > abs(dx) * 1.5f && start.x < width * .28f -> 2
+                                    abs(dy) > abs(dx) * 1.5f && start.x > width * .72f -> 3
+                                    else -> 4
+                                }
+                                when (gestureMode) {
+                                    1 -> {
+                                        // 一个完整的横滑只跳转一次，避免连续 MOVE 事件重复快进。
+                                        if (dx > 0) player.seekForward() else player.seekBack()
+                                    }
+                                    2 -> {
+                                        val brightness = activity.window.attributes.screenBrightness
+                                        startBrightness = if (brightness >= 0f) brightness else
+                                            Settings.System.getInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS, 128) / 255f
+                                    }
+                                    3 -> {
+                                        if (audioManager.isVolumeFixed) {
+                                            seekFeedback = "此设备的系统音量不可调"
+                                            seekActivity++
+                                            gestureMode = 4
+                                        } else startVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+                                    }
+                                }
+                            }
+                            when (gestureMode) {
+                                2 -> {
+                                    val brightness = (startBrightness - dy / height).coerceIn(.02f, 1f)
+                                    if (abs(brightness - appliedBrightness) >= .01f) {
+                                        activity.window.attributes = activity.window.attributes.apply { screenBrightness = brightness }
+                                        appliedBrightness = brightness
+                                        seekFeedback = "亮度 ${(brightness * 100).roundToInt()}%"
+                                        seekActivity++
+                                    }
+                                }
+                                3 -> {
+                                    val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+                                    val volume = (startVolume - dy / height * maxVolume).roundToInt().coerceIn(0, maxVolume)
+                                    if (volume != appliedVolume) {
+                                        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, volume, 0)
+                                        appliedVolume = volume
+                                        seekFeedback = "音量 ${(volume * 100f / maxVolume).roundToInt()}%"
+                                        seekActivity++
+                                    }
+                                }
+                            }
+                            return true
+                        }
+                    })
+
+                    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+                        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                            stopFastForward()
+                            // 控制栏下方四分之一区域保留原生点击；画面区域由手势统一处理。
+                            handleVideoGesture = !isControllerFullyVisible || event.y < height * .75f
+                            gestureMode = 0
+                            appliedBrightness = -1f
+                            appliedVolume = -1
+                        }
+                        if (!handleVideoGesture) return super.dispatchTouchEvent(event)
+                        if (event.actionMasked == MotionEvent.ACTION_POINTER_DOWN) {
+                            stopFastForward()
+                            gestureMode = 4
+                        }
+                        gestures.onTouchEvent(event)
+                        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                            stopFastForward()
+                            handleVideoGesture = false
+                        }
+                        return true
+                    }
+
                     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
                         return handlePlaybackKey(event) || super.dispatchKeyEvent(event)
                     }
@@ -375,7 +509,6 @@ fun NativePlayer(
                     // 进度条和底栏按钮用同样的白色描边，焦点在深色画面上更容易辨认。
                     val controlLabels = listOf(
                         androidx.media3.ui.R.id.exo_progress to "进度条 · 左右键跳转",
-                        androidx.media3.ui.R.id.exo_play_pause to "播放 / 暂停",
                         androidx.media3.ui.R.id.exo_subtitle to "字幕",
                         androidx.media3.ui.R.id.exo_fullscreen to "全屏",
                         androidx.media3.ui.R.id.exo_overflow_show to "更多",
@@ -420,8 +553,6 @@ fun NativePlayer(
                             showSpeedMenu = true
                         }
                     }
-                    findViewById<View>(androidx.media3.ui.R.id.exo_play_pause)?.nextFocusRightId = speedButton.id
-                    speedButton.nextFocusLeftId = androidx.media3.ui.R.id.exo_play_pause
                     basicControls.addView(speedButton, insertAt++, LinearLayout.LayoutParams((64 * resources.displayMetrics.density).toInt(), buttonSize))
                     fun addControl(icon: Int, description: String, enabled: Boolean = true, action: () -> Unit) {
                         val button = ImageButton(context).apply {
@@ -489,9 +620,9 @@ fun NativePlayer(
                     .padding(horizontal = 14.dp, vertical = 8.dp),
             )
         }
-        if (seekFeedback.isNotEmpty()) {
+        if (heldSpeed != null || seekFeedback.isNotEmpty()) {
             Label(
-                seekFeedback, 22, Color.White,
+                if (heldSpeed != null) "2× 快进播放 · 松开恢复" else seekFeedback, 22, Color.White,
                 Modifier.align(Alignment.BottomCenter).padding(bottom = 140.dp)
                     .background(Color(0xDD101014), androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
                     .padding(horizontal = 22.dp, vertical = 12.dp), bold = true,
@@ -508,7 +639,11 @@ fun NativePlayer(
                         Label("选集", 25, Color.White, bold = true)
                         Spacer(Modifier.height(18.dp))
                         if (lines.size > 1) {
-                            LazyRow(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                            // 选集面板的首尾按钮聚焦后会放大，给描边留出空间。
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(9.dp),
+                            ) {
                                 items(lines.indices.toList()) { index ->
                                     val chooseLine: () -> Unit = {
                                         if (selectedLine != index) {
@@ -516,7 +651,7 @@ fun NativePlayer(
                                             scope.launch { episodeGridState.scrollToItem(0) }
                                         }
                                     }
-                                    FocusButton(lines[index].name, selected = selectedLine == index,
+                                    FocusButton(lines[index].name, selected = selectedLine == index, tab = true,
                                         modifier = if (index == 0) Modifier.focusRequester(lineFocus) else Modifier,
                                         onFocus = chooseLine, onClick = chooseLine)
                                 }
@@ -532,6 +667,7 @@ fun NativePlayer(
                         LazyVerticalGrid(
                             columns = GridCells.Fixed(3),
                             state = episodeGridState,
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                             horizontalArrangement = Arrangement.spacedBy(9.dp),
                             verticalArrangement = Arrangement.spacedBy(9.dp),
                             modifier = Modifier.weight(1f),
@@ -540,6 +676,7 @@ fun NativePlayer(
                                 FocusButton(
                                     episodes[index].label,
                                     selected = selectedLine == currentLineIndex && index == currentEpisodeIndex,
+                                    tab = true,
                                     modifier = if (index == focusIndex) Modifier.focusRequester(episodeFocus) else Modifier,
                                     onClick = {
                                         reportPosition()

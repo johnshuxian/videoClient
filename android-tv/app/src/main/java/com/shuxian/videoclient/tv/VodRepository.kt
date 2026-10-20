@@ -48,6 +48,7 @@ class VodRepository {
     private val posterCache = object : LruCache<String, Bitmap>(16 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount
     }
+    private val posterSemaphore = Semaphore(4)
 
     private fun endpoint(address: String, vararg parameters: Pair<String, String>): String {
         val original = Uri.parse(address)
@@ -251,15 +252,20 @@ class VodRepository {
         if (address.isBlank()) return null
         synchronized(posterCache) { posterCache.get(address) }?.let { return it }
         return withContext(Dispatchers.IO) {
-            try {
-                val request = connection(address)
+            posterSemaphore.withPermit {
+                synchronized(posterCache) { posterCache.get(address) }?.let { return@withPermit it }
                 try {
-                    // 保留图片源的像素尺寸；海报通常不大，强制采样会让封面明显变糊。
-                    val bitmap = request.inputStream.use { BitmapFactory.decodeStream(it) }
-                    if (bitmap != null) synchronized(posterCache) { posterCache.put(address, bitmap) }
-                    bitmap
-                } finally { request.disconnect() }
-            } catch (_: Exception) { null }
+                    val request = connection(address)
+                    try {
+                        // 保留原图像素；只限制同时解码的海报数量，避免翻页时争用 CPU 和内存。
+                        val bitmap = request.inputStream.use { BitmapFactory.decodeStream(it) }
+                        if (bitmap != null) synchronized(posterCache) { posterCache.put(address, bitmap) }
+                        bitmap
+                    } finally { request.disconnect() }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) { null }
+            }
         }
     }
 }
