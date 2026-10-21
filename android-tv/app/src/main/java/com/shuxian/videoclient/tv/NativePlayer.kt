@@ -109,6 +109,7 @@ fun NativePlayer(
     var showSpeedMenu by remember(url) { mutableStateOf(false) }
     var controllerVisible by remember(url) { mutableStateOf(false) }
     var playbackPaused by remember(url) { mutableStateOf(false) }
+    var buffering by remember(url) { mutableStateOf(true) }
     var showPlayFeedback by remember(url) { mutableStateOf(false) }
     var seekFeedback by remember(url) { mutableStateOf("") }
     var heldSpeed by remember(url) { mutableStateOf<Float?>(null) }
@@ -285,6 +286,11 @@ fun NativePlayer(
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying) reportPosition()
             }
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                buffering = playbackState == Player.STATE_BUFFERING
+                // Media3 播放完当前集后，沿用手动“下一集”的切集流程。
+                if (playbackState == Player.STATE_ENDED && hasNext) onNextEpisode()
+            }
             override fun onPlayerError(error: PlaybackException) {
                 onPlaybackFailure(error.message ?: "当前线路播放失败", player.currentPosition)
             }
@@ -302,6 +308,8 @@ fun NativePlayer(
             }
         }
         player.addListener(listener)
+        // prepare() 先于监听器注册，初始状态也需要同步，避免首帧已就绪时仍显示加载提示。
+        buffering = player.playbackState == Player.STATE_IDLE || player.playbackState == Player.STATE_BUFFERING
         playbackPaused = !player.playWhenReady
         view.keepScreenOn = true
         onDispose {
@@ -506,21 +514,28 @@ fun NativePlayer(
                         }
                     })
                     hideController()
-                    // 进度条和底栏按钮用同样的白色描边，焦点在深色画面上更容易辨认。
+                    // 进度条只显示描边；底栏按钮的焦点同时显示描边和橙色短横杠。
                     val controlLabels = listOf(
                         androidx.media3.ui.R.id.exo_progress to "进度条 · 左右键跳转",
+                        androidx.media3.ui.R.id.exo_vr to "VR",
+                        androidx.media3.ui.R.id.exo_shuffle to "随机播放",
+                        androidx.media3.ui.R.id.exo_repeat_toggle to "循环播放",
                         androidx.media3.ui.R.id.exo_subtitle to "字幕",
                         androidx.media3.ui.R.id.exo_fullscreen to "全屏",
                         androidx.media3.ui.R.id.exo_overflow_show to "更多",
+                        androidx.media3.ui.R.id.exo_overflow_hide to "收起更多",
+                        androidx.media3.ui.R.id.exo_minimal_fullscreen to "全屏",
                     )
                     controlLabels.forEach { (id, label) ->
                         findViewById<View>(id)?.apply {
-                            if (id == androidx.media3.ui.R.id.exo_progress) isFocusable = true
+                            val progress = id == androidx.media3.ui.R.id.exo_progress
+                            if (progress) isFocusable = true
+                            else setBackgroundColor(android.graphics.Color.TRANSPARENT)
                             setOnFocusChangeListener { target, focused ->
-                                target.foreground = if (focused) GradientDrawable().apply {
+                                target.foreground = if (!focused) null else if (progress) GradientDrawable().apply {
                                     cornerRadius = 8 * resources.displayMetrics.density
                                     setStroke((3 * resources.displayMetrics.density).toInt(), android.graphics.Color.WHITE)
-                                } else null
+                                } else context.getDrawable(R.drawable.tv_control_underline)
                                 if (focused) controlFocusLabel = label
                                 else if (controlFocusLabel == label) controlFocusLabel = ""
                             }
@@ -540,11 +555,9 @@ fun NativePlayer(
                         setTextColor(android.graphics.Color.WHITE)
                         gravity = Gravity.CENTER
                         isFocusable = true
-                        val shape = GradientDrawable().apply { cornerRadius = 8 * resources.displayMetrics.density }
-                        background = shape
-                        setOnFocusChangeListener { _, focused ->
-                            shape.setColor(if (focused) android.graphics.Color.rgb(255, 121, 44) else android.graphics.Color.TRANSPARENT)
-                            shape.setStroke((3 * resources.displayMetrics.density).toInt(), if (focused) android.graphics.Color.WHITE else android.graphics.Color.TRANSPARENT)
+                        setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                        setOnFocusChangeListener { target, focused ->
+                            target.foreground = if (focused) context.getDrawable(R.drawable.tv_control_underline) else null
                             if (focused) controlFocusLabel = "倍速"
                             else if (controlFocusLabel == "倍速") controlFocusLabel = ""
                         }
@@ -562,11 +575,9 @@ fun NativePlayer(
                             isEnabled = enabled
                             alpha = if (enabled) 1f else .4f
                             setPadding(iconPadding, iconPadding, iconPadding, iconPadding)
-                            val shape = GradientDrawable().apply { cornerRadius = 8 * resources.displayMetrics.density }
-                            background = shape
-                            setOnFocusChangeListener { _, focused ->
-                                shape.setColor(if (focused) android.graphics.Color.rgb(255, 121, 44) else android.graphics.Color.TRANSPARENT)
-                                shape.setStroke((3 * resources.displayMetrics.density).toInt(), if (focused) android.graphics.Color.WHITE else android.graphics.Color.TRANSPARENT)
+                            setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                            setOnFocusChangeListener { target, focused ->
+                                target.foreground = if (focused) context.getDrawable(R.drawable.tv_control_underline) else null
                                 if (focused) controlFocusLabel = description
                                 else if (controlFocusLabel == description) controlFocusLabel = ""
                             }
@@ -591,7 +602,13 @@ fun NativePlayer(
             },
             modifier = Modifier.fillMaxSize(),
         )
-        if (playbackPaused || showPlayFeedback) {
+        if (buffering) {
+            Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                LoadingIndicator()
+                Spacer(Modifier.height(12.dp))
+                Label("加载中", 22, Color.White)
+            }
+        } else if (playbackPaused || showPlayFeedback) {
             Box(
                 Modifier.align(Alignment.Center).size(88.dp).background(Color(0x99000000), CircleShape),
                 contentAlignment = Alignment.Center,

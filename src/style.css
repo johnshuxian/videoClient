@@ -1820,6 +1820,7 @@ html[data-harmony="true"] .art-video-player.art-fullscreen-web .art-bottom {
   appearance: none;
   width: 36px;
   height: 20px;
+  margin: 0;
   border-radius: 12px;
   background: #526273;
   position: relative;
@@ -2457,8 +2458,22 @@ html[data-harmony="true"] .light .detail-overlay {
   color: #fff;
   box-shadow: none;
 }
+.light .setting-row input {
+  /* 浅色主题用明亮轨道表示关闭，和深色开启态形成明显区别。 */
+  background: #e8f0f4;
+  border: 1px solid #8ba5b3;
+}
+.light .setting-row input:after {
+  top: 2px;
+  left: 2px;
+  background: #526f80;
+}
 .light .setting-row input:checked {
-  background: #405d6d;
+  background: #31586e;
+  border-color: #31586e;
+}
+.light .setting-row input:checked:after {
+  background: #fff;
 }
 .light .source-row input {
   accent-color: #405d6d;

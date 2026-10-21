@@ -86,6 +86,10 @@ class TvSettings(context: Context) {
         get() = preferences.getString("subscription_url", "").orEmpty()
         set(value) { preferences.edit().putString("subscription_url", value).apply() }
 
+    var exactSearch: Boolean
+        get() = preferences.getBoolean("exact_search", false)
+        set(value) { preferences.edit().putBoolean("exact_search", value).apply() }
+
     var selectedSourceUrl: String
         get() = preferences.getString("selected_source_url", "").orEmpty()
         set(value) { preferences.edit().putString("selected_source_url", value).apply() }

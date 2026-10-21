@@ -1,0 +1,44 @@
+{
+  "sources": [
+    {
+      "name": "非凡资源",
+      "url": "http://cj.ffzyapi.com/api.php/provide/vod/",
+      "isAdult": false
+    },
+    {
+      "name": "量子资源2",
+      "url": "http://cj.lziapi.com/api.php/provide/vod/",
+      "isAdult": false
+    },
+    {
+      "name": "红牛资源",
+      "url": "https://www.hongniuzy2.com/api.php/provide/vod/",
+      "isAdult": false
+    },
+    {
+      "name": "暴风资源",
+      "url": "https://bfzyapi.com/api.php/provide/vod/?ac=list",
+      "isAdult": false
+    },
+    {
+      "name": "百度资源",
+      "url": "https://api.apibdzy.com/api.php/provide/vod/?ac=list",
+      "isAdult": false
+    },
+    {
+      "name": "新浪资源",
+      "url": "https://api.xinlangapi.com/xinlangapi.php/provide//vod/",
+      "isAdult": false
+    },
+    {
+      "name": "光速资源",
+      "url": "https://api.guangsuapi.com/api.php/provide/vod/from/gsm3u8/",
+      "isAdult": false
+    },
+    {
+      "name": "ckzy（成人源）",
+      "url": "https://ckzy.me/api.php/provide/vod/?ac=list",
+      "isAdult": true
+    }
+  ]
+}

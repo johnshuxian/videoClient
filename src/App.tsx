@@ -857,6 +857,9 @@ export default function App() {
   );
   const filterAds = true;
   const [autoplay, setAutoplay] = useState(readStorage("autoplay", true));
+  const [exactSearch, setExactSearch] = useState(
+    readStorage("exact-search", false),
+  );
   const [history, setHistory] = useState<HistoryItem[]>(
     readStorage("history", []),
   );
@@ -869,7 +872,15 @@ export default function App() {
   );
   const [showRecentSearches, setShowRecentSearches] = useState(false);
   const [searched, setSearched] = useState("");
+  // 点播源接收完整搜索词；精确搜索筛选片名时才取首段。
+  const searchKeyword = searched.split(" ")[0];
   const [results, setResults] = useState<SearchItem[]>([]);
+  // 精确搜索只筛选片名；保留原始结果，关闭开关时无需重新请求各个源。
+  const visibleResults = exactSearch && searchKeyword
+    ? results.filter((item) =>
+        item.title.toLocaleLowerCase().includes(searchKeyword.toLocaleLowerCase()),
+      )
+    : results;
   const [failed, setFailed] = useState<string[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchProgress, setSearchProgress] = useState(0);
@@ -974,9 +985,11 @@ export default function App() {
     if (detailCloseTimer.current) clearTimeout(detailCloseTimer.current);
     if (settingsCloseTimer.current) clearTimeout(settingsCloseTimer.current);
   }, []);
-  const enabledSources = sources.filter(
-    (source) => enabled.includes(source.url) && !source.isAdult,
+  // 启用的成人源可在“自定义”页浏览，但搜索仍单独过滤成人源。
+  const enabledSources = sources.filter((source) =>
+    enabled.includes(source.url),
   );
+  const searchableSources = enabledSources.filter((source) => !source.isAdult);
   const customSource =
     enabledSources.find((source) => source.url === customSourceUrl) ||
     enabledSources[0];
@@ -1358,7 +1371,7 @@ export default function App() {
   }, [castingDevice, selected, detail, line, episode]);
 
   async function searchFor(value: string) {
-    const term = value.trim();
+    const term = value.trim().replace(/\s+/g, " ");
     if (!term) return;
     // 从推荐、输入框或历史记录发起的搜索都进入同一份最近记录。
     const nextSearches = [
@@ -1388,17 +1401,14 @@ export default function App() {
     setSearchProgress(0);
     setResults([]);
     setFailed([]);
-    const selectedSources = sources.filter(
-      (source) => enabled.includes(source.url) && !source.isAdult,
-    );
-    if (selectedSources.length === 0) {
+    if (searchableSources.length === 0) {
       setSearchLoading(false);
       return;
     }
     try {
       const data = await window.videoAPI.search(
         term,
-        selectedSources,
+        searchableSources,
         serial,
         (completed, total, items, failedSource) => {
           if (serial !== searchSerial.current) return;
@@ -1448,7 +1458,7 @@ export default function App() {
         sources.length === 0
           ? list.filter((source) => !source.isAdult).map((source) => source.url)
           : enabled.filter((url) =>
-              list.some((source) => source.url === url && !source.isAdult),
+              list.some((source) => source.url === url),
             );
       setSources(list);
       setEnabled(nextEnabled);
@@ -2569,8 +2579,8 @@ export default function App() {
                       “{searched}” 的搜索结果{" "}
                       <span>
                         {searchLoading
-                          ? `已找到 ${results.length} 条 · 搜索中...`
-                          : `共 ${results.length} 条`}
+                          ? `已找到 ${visibleResults.length} 条 · 搜索中...`
+                          : `共 ${visibleResults.length} 条`}
                       </span>
                     </h2>
                   </div>
@@ -2591,7 +2601,8 @@ export default function App() {
                   )}
                 </div>
                 <p className="search-subtitle">
-                  来自 {enabled.length} 个已启用点播源 · 点击资源查看线路与选集
+                  来自 {searchableSources.length} 个可搜索点播源 ·
+                  点击资源查看线路与选集
                 </p>
                 {failed.length > 0 && (
                   <div className="notice">
@@ -2600,7 +2611,7 @@ export default function App() {
                     {failed.length > 6 ? "…" : ""}
                   </div>
                 )}
-                {searchLoading && results.length === 0 && (
+                {searchLoading && visibleResults.length === 0 && (
                   <div className="search-wait" role="status" aria-live="polite">
                     <div className="search-wait-card">
                       <div className="search-wait-symbol" aria-hidden="true">
@@ -2625,7 +2636,7 @@ export default function App() {
                     </div>
                   </div>
                 )}
-                {searchLoading && results.length > 0 && (
+                {searchLoading && visibleResults.length > 0 && (
                   <div className="search-progress-inline" role="status">
                     <span>继续搜索其他点播源</span>
                     <b>{searchProgress}%</b>
@@ -2634,30 +2645,34 @@ export default function App() {
                     </div>
                   </div>
                 )}
-                {!searchLoading && enabled.length === 0 && (
+                {!searchLoading && searchableSources.length === 0 && (
                   <div className="empty">
                     <Settings2 size={36} />
-                    <h3>先导入点播源</h3>
-                    <p>在播放设置中粘贴 VOD 源订阅地址，导入后即可搜索。</p>
+                    <h3>先启用可搜索的点播源</h3>
+                    <p>在播放设置中导入并启用非成人源后即可搜索。</p>
                     <button
                       className="primary-button"
                       onClick={() => setSettingsOpen(true)}
                     >
-                      导入点播源
+                      打开播放设置
                     </button>
                   </div>
                 )}
                 {!searchLoading &&
-                  enabled.length > 0 &&
-                  results.length === 0 && (
+                  searchableSources.length > 0 &&
+                  visibleResults.length === 0 && (
                     <div className="empty">
                       <Search size={36} />
                       <h3>没有找到相关资源</h3>
-                      <p>试试更短的片名，或在设置中启用更多点播源。</p>
+                      <p>
+                        {exactSearch
+                          ? "片名需包含完整关键词；可缩短关键词或在设置中关闭精确搜索。"
+                          : "试试更短的片名，或在设置中启用更多点播源。"}
+                      </p>
                     </div>
                   )}
                 <div className="poster-grid result-grid">
-                  {results.map((item) => (
+                  {visibleResults.map((item) => (
                     <button
                       className="poster-card"
                       key={`${item.sourceUrl}:${item.id}`}
@@ -3123,16 +3138,31 @@ export default function App() {
                   }}
                 />
               </label>
+              <h3>搜索</h3>
+              <label className="setting-row">
+                <div>
+                  <strong>精确搜索</strong>
+                  <p>精确匹配时只取第一段；仅显示片名包含该关键词的结果</p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={exactSearch}
+                  onChange={(event) => {
+                    setExactSearch(event.target.checked);
+                    saveStorage("exact-search", event.target.checked);
+                  }}
+                />
+              </label>
               <div className="settings-subhead">
                 <h3>
                   点播源{" "}
                   <small>
-                    {enabled.length} / {testTotal} 已启用
+                    {enabled.length} / {sources.length} 已启用
                   </small>
                 </h3>
               </div>
               <p className="settings-note">
-                输入订阅地址导入点播源；成人源不参与搜索。
+                输入订阅地址导入点播源；成人源可启用并在“自定义”中浏览，不参与搜索和测活。
               </p>
               <form
                 className="source-import"
@@ -3194,9 +3224,7 @@ export default function App() {
                   </button>
                   <button
                     onClick={() => {
-                      const next = sources
-                        .filter((source) => !source.isAdult)
-                        .map((source) => source.url);
+                      const next = sources.map((source) => source.url);
                       setEnabled(next);
                       saveStorage("vod-enabled", next);
                     }}
@@ -3253,37 +3281,36 @@ export default function App() {
                 </div>
               )}
               <div className="source-list">
-                {sources
-                  .filter((source) => !source.isAdult)
-                  .map((source) => (
-                    <label key={source.url} className="source-row">
-                      <input
-                        type="checkbox"
-                        checked={enabled.includes(source.url)}
-                        onChange={(event) => {
-                          const next = event.target.checked
-                            ? [...enabled, source.url]
-                            : enabled.filter((url) => url !== source.url);
-                          setEnabled(next);
-                          saveStorage("vod-enabled", next);
-                        }}
-                      />
-                      <span className="source-row-copy">
-                        <strong>{source.name}</strong>
-                        <small>{new URL(source.url).host}</small>
+                {sources.map((source) => (
+                  <label key={source.url} className="source-row">
+                    <input
+                      type="checkbox"
+                      checked={enabled.includes(source.url)}
+                      onChange={(event) => {
+                        const next = event.target.checked
+                          ? [...enabled, source.url]
+                          : enabled.filter((url) => url !== source.url);
+                        setEnabled(next);
+                        saveStorage("vod-enabled", next);
+                      }}
+                    />
+                    <span className="source-row-copy">
+                      <strong>{source.name}</strong>
+                      {source.isAdult && <small>成人源 · 不参与搜索</small>}
+                      <small>{new URL(source.url).host}</small>
+                    </span>
+                    {sourceHealth[source.url] && (
+                      <span
+                        className={`health-badge ${sourceHealth[source.url].ok ? "ok" : "bad"}`}
+                        title={sourceHealth[source.url].error || ""}
+                      >
+                        {sourceHealth[source.url].ok
+                          ? `搜索可用 · ${sourceHealth[source.url].latencyMs}ms · ${sourceHealth[source.url].resultCount}条`
+                          : `搜索失败 · ${sourceHealth[source.url].latencyMs}ms · ${sourceHealth[source.url].error || "未知错误"}`}
                       </span>
-                      {sourceHealth[source.url] && (
-                        <span
-                          className={`health-badge ${sourceHealth[source.url].ok ? "ok" : "bad"}`}
-                          title={sourceHealth[source.url].error || ""}
-                        >
-                          {sourceHealth[source.url].ok
-                            ? `搜索可用 · ${sourceHealth[source.url].latencyMs}ms · ${sourceHealth[source.url].resultCount}条`
-                            : `搜索失败 · ${sourceHealth[source.url].latencyMs}ms · ${sourceHealth[source.url].error || "未知错误"}`}
-                        </span>
-                      )}
-                    </label>
-                  ))}
+                    )}
+                  </label>
+                ))}
               </div>
               <button
                 type="button"

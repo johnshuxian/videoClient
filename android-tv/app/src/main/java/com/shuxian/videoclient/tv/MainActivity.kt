@@ -71,6 +71,7 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -81,12 +82,17 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -129,9 +135,9 @@ private fun TvApp(onExit: () -> Unit) {
     var confirmClearHistory by remember { mutableStateOf(false) }
     var selectedSourceUrl by remember { mutableStateOf(settings.selectedSourceUrl) }
     var subscriptionInput by remember { mutableStateOf(settings.subscriptionUrl) }
-    // 自定义页只用这里选中的源；搜索会独立查询所有已启用的源。
-    val selectedSource = sources.firstOrNull { it.url == selectedSourceUrl && it.enabled && !it.isAdult }
-        ?: sources.firstOrNull { it.enabled && !it.isAdult }
+    // 自定义页可浏览已启用的成人源；搜索仍在 VodRepository 中排除成人源。
+    val selectedSource = sources.firstOrNull { it.url == selectedSourceUrl && it.enabled }
+        ?: sources.firstOrNull { it.enabled }
     var section by remember { mutableStateOf("movie") }
     var tag by remember { mutableStateOf("热门") }
     var categoryId by remember { mutableStateOf<Int?>(null) }
@@ -147,11 +153,19 @@ private fun TvApp(onExit: () -> Unit) {
     var sourceRevision by remember { mutableIntStateOf(0) }
     var screen by remember { mutableStateOf("browse") }
     var exitPromptUntil by remember { mutableLongStateOf(0L) }
+    var exitBlockedUntil by remember { mutableLongStateOf(0L) }
     var returnScreen by remember { mutableStateOf("browse") }
     var settingsReturnScreen by remember { mutableStateOf("browse") }
     var query by remember { mutableStateOf("") }
     var searchedTerm by remember { mutableStateOf("") }
+    // 点播源接收完整搜索词；精确搜索筛选片名时才取首段。
+    val searchKeyword = searchedTerm.substringBefore(' ')
     var searchResults by remember { mutableStateOf<List<VideoItem>>(emptyList()) }
+    var exactSearch by remember { mutableStateOf(settings.exactSearch) }
+    // 保留源返回的全部结果，设置切换后搜索页可立即更新。
+    val visibleSearchResults = if (exactSearch && searchKeyword.isNotEmpty()) {
+        searchResults.filter { it.title.contains(searchKeyword, ignoreCase = true) }
+    } else searchResults
     var searchLoading by remember { mutableStateOf(false) }
     var searchError by remember { mutableStateOf("") }
     var searchCompleted by remember { mutableIntStateOf(0) }
@@ -230,7 +244,7 @@ private fun TvApp(onExit: () -> Unit) {
     }
 
     fun search(term: String) {
-        val value = term.trim().take(60)
+        val value = term.trim().replace(Regex("[\\s\\u3000]+"), " ").take(60).trimEnd()
         if (value.isEmpty()) return
         usedNavigationToken = navigationToken
         query = value
@@ -442,7 +456,7 @@ private fun TvApp(onExit: () -> Unit) {
         derivedStateOf { browseGridState.firstVisibleItemIndex > 0 || browseGridState.firstVisibleItemScrollOffset > 0 }
     }
     val listIsScrolled = (screen == "browse" || screen == "search") && gridIsScrolled
-    // 首页首次返回只提示，短时间内再次返回才退出；离开首页或继续操作会取消提示。
+    // 首页各分类首次返回才提示；退出其他页面的连续按键不计入首页退出操作。
     LaunchedEffect(exitPromptUntil) {
         if (exitPromptUntil != 0L) {
             delay(2000)
@@ -453,6 +467,11 @@ private fun TvApp(onExit: () -> Unit) {
         if (screen != "browse") exitPromptUntil = 0L
     }
     BackHandler {
+        val now = SystemClock.elapsedRealtime()
+        if (screen != "browse" || listIsScrolled) {
+            exitPromptUntil = 0L
+            exitBlockedUntil = now + 800L
+        }
         if (listIsScrolled) scope.launch { browseGridState.scrollToItem(0) }
         else when (screen) {
             "player" -> {
@@ -460,10 +479,10 @@ private fun TvApp(onExit: () -> Unit) {
             }
             "detail" -> screen = returnScreen
             "settings" -> screen = settingsReturnScreen
-            "browse" -> {
-                val now = SystemClock.elapsedRealtime()
-                if (now < exitPromptUntil) onExit()
-                else exitPromptUntil = now + 2000L
+            "browse" -> when {
+                now < exitBlockedUntil -> Unit
+                now < exitPromptUntil -> onExit()
+                else -> exitPromptUntil = now + 2000L
             }
             else -> screen = "browse"
         }
@@ -575,7 +594,13 @@ private fun TvApp(onExit: () -> Unit) {
                         )
                     }
                 } else {
-                    Label(streamStatus, 24, white, Modifier.align(Alignment.Center))
+                    Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                        LoadingIndicator()
+                        Spacer(Modifier.height(12.dp))
+                        Label("加载中", 22, white)
+                        Spacer(Modifier.height(8.dp))
+                        Label(streamStatus, 16, muted)
+                    }
                 }
             }
             "detail" -> {
@@ -657,8 +682,8 @@ private fun TvApp(onExit: () -> Unit) {
                                     sources = imported
                                     settings.sources = imported
                                     settings.subscriptionUrl = subscriptionInput.trim()
-                                    val chosen = imported.firstOrNull { it.url == selectedSourceUrl && it.enabled && !it.isAdult }
-                                        ?: imported.firstOrNull { it.enabled && !it.isAdult }
+                                    val chosen = imported.firstOrNull { it.url == selectedSourceUrl && it.enabled }
+                                        ?: imported.firstOrNull { it.enabled }
                                     selectedSourceUrl = chosen?.url.orEmpty()
                                     settings.selectedSourceUrl = selectedSourceUrl
                                     categoryId = null
@@ -675,8 +700,19 @@ private fun TvApp(onExit: () -> Unit) {
                     if (settingsError.isNotEmpty()) Label(settingsError, 16, Color(0xFFFFA6A6), Modifier.padding(top = 10.dp))
                     if (settingsMessage.isNotEmpty()) Label(settingsMessage, 16, accent, Modifier.padding(top = 10.dp))
                     Spacer(Modifier.height(22.dp))
-                    Label("点播源 · ${sources.count { it.enabled && !it.isAdult }} 个已启用", 20, white, bold = true)
-                    Label("搜索所有已启用源；“自定义”只浏览下面选定的源。", 15, muted, Modifier.padding(top = 6.dp, bottom = 14.dp))
+                    Label("搜索", 20, white, bold = true)
+                    Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Label("精确搜索", 18, white, bold = true)
+                            Label("精确匹配时只取第一段；仅显示片名包含该关键词的结果", 15, muted, Modifier.padding(top = 5.dp))
+                        }
+                        FocusButton(if (exactSearch) "已开启" else "已关闭", selected = exactSearch, tab = true, onClick = {
+                            exactSearch = !exactSearch
+                            settings.exactSearch = exactSearch
+                        })
+                    }
+                    Label("点播源 · ${sources.count { it.enabled }} 个已启用", 20, white, bold = true)
+                    Label("成人源可启用并在“自定义”中浏览，不参与搜索。", 15, muted, Modifier.padding(top = 6.dp, bottom = 14.dp))
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.weight(1f)) {
                         items(sources, key = { it.url }) { source ->
                             Row(
@@ -688,27 +724,25 @@ private fun TvApp(onExit: () -> Unit) {
                                     Label(source.name, 18, white, bold = true, maxLines = 1)
                                     Label(source.url, 13, muted, maxLines = 1)
                                 }
-                                if (source.isAdult) Label("限制源", 14, muted)
-                                else {
-                                    FocusButton(if (source.enabled) "✓ 已启用" else "启用", selected = source.enabled, onClick = {
-                                        sources = sources.map { if (it.url == source.url) it.copy(enabled = !it.enabled) else it }
-                                        settings.sources = sources
-                                        val chosen = sources.firstOrNull { it.url == selectedSourceUrl && it.enabled && !it.isAdult }
-                                            ?: sources.firstOrNull { it.enabled && !it.isAdult }
-                                        selectedSourceUrl = chosen?.url.orEmpty()
-                                        settings.selectedSourceUrl = selectedSourceUrl
-                                        categoryId = null
-                                        page = 0
-                                        videos = emptyList()
-                                    })
-                                    FocusButton(if (selectedSource?.url == source.url) "● 自定义源" else "选为自定义源", selected = selectedSource?.url == source.url, enabled = source.enabled, onClick = {
-                                        selectedSourceUrl = source.url
-                                        settings.selectedSourceUrl = source.url
-                                        categoryId = null
-                                        page = 0
-                                        videos = emptyList()
-                                    })
-                                }
+                                if (source.isAdult) Label("成人源", 14, muted)
+                                FocusButton(if (source.enabled) "✓ 已启用" else "启用", selected = source.enabled, onClick = {
+                                    sources = sources.map { if (it.url == source.url) it.copy(enabled = !it.enabled) else it }
+                                    settings.sources = sources
+                                    val chosen = sources.firstOrNull { it.url == selectedSourceUrl && it.enabled }
+                                        ?: sources.firstOrNull { it.enabled }
+                                    selectedSourceUrl = chosen?.url.orEmpty()
+                                    settings.selectedSourceUrl = selectedSourceUrl
+                                    categoryId = null
+                                    page = 0
+                                    videos = emptyList()
+                                })
+                                FocusButton(if (selectedSource?.url == source.url) "● 自定义源" else "选为自定义源", selected = selectedSource?.url == source.url, enabled = source.enabled, onClick = {
+                                    selectedSourceUrl = source.url
+                                    settings.selectedSourceUrl = source.url
+                                    categoryId = null
+                                    page = 0
+                                    videos = emptyList()
+                                })
                             }
                         }
                     }
@@ -755,7 +789,7 @@ private fun TvApp(onExit: () -> Unit) {
                                     Label("搜索电影、电视、综艺", 18, if (searchFocused) white else muted, maxLines = 1)
                                 }
                                 Spacer(Modifier.weight(1f))
-                                FocusButton("设置", modifier = Modifier.focusProperties { down = menuFocus.getValue(lastFocusedMenu) }, onClick = { settingsReturnScreen = screen; screen = "settings" })
+                                FocusButton("设置", tab = true, modifier = Modifier.focusProperties { down = menuFocus.getValue(lastFocusedMenu) }, onClick = { settingsReturnScreen = screen; screen = "settings" })
                             }
                             Spacer(Modifier.height(20.dp))
                             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -787,14 +821,14 @@ private fun TvApp(onExit: () -> Unit) {
                                 Spacer(Modifier.height(18.dp))
                                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                                     SearchInput(query, { query = it }, "用拼音输入法输入片名", Modifier.weight(1f).widthIn(max = 680.dp).focusRequester(searchFieldFocus), ImeAction.Search) { search(query) }
-                                    FocusButton("搜索", selected = true, onClick = { search(query) })
+                                    FocusButton("搜索", tab = true, onClick = { search(query) })
                                 }
                                 Label("按确认键输入中文片名，再选择搜索。", 16, muted, Modifier.padding(top = 10.dp))
                                 Spacer(Modifier.height(24.dp))
                                 if (searchedTerm.isNotEmpty()) {
                                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                         Label("“$searchedTerm” 的搜索结果", 24, white, Modifier.weight(1f), bold = true, maxLines = 1)
-                                        Label("${searchResults.size} 个结果", 16, muted)
+                                        Label("${visibleSearchResults.size} 个结果", 16, muted)
                                     }
                                     Spacer(Modifier.height(14.dp))
                                     if (searchTotal > 0) {
@@ -808,18 +842,21 @@ private fun TvApp(onExit: () -> Unit) {
                                         }
                                     }
                                     if (searchError.isNotEmpty()) Label(searchError, 17, Color(0xFFFFB5A6))
-                                    else if (searchTotal == 0) Label("请先在设置中导入并启用点播源。", 18, muted)
-                                    else if (!searchLoading && searchResults.isEmpty() && searchFailures.size == searchTotal) Label("所有点播源均搜索失败，请检查网络或源地址。", 18, Color(0xFFFFB5A6))
-                                    else if (!searchLoading && searchResults.isEmpty()) Label("没有找到相关影片，可以试试其他关键词。", 18, muted)
+                                    else if (searchTotal == 0) Label("请先在设置中导入并启用非成人源。", 18, muted)
+                                    else if (!searchLoading && visibleSearchResults.isEmpty() && searchFailures.size == searchTotal) Label("所有点播源均搜索失败，请检查网络或源地址。", 18, Color(0xFFFFB5A6))
+                                    else if (!searchLoading && visibleSearchResults.isEmpty()) Label(
+                                        if (exactSearch) "片名没有包含完整关键词，可缩短关键词或关闭精确搜索。" else "没有找到相关影片，可以试试其他关键词。",
+                                        18, muted,
+                                    )
                                     if (searchFailures.isNotEmpty()) Label("${searchFailures.size} 个源请求失败：${searchFailures.take(2).joinToString("；")}", 14, muted, Modifier.padding(top = 7.dp), maxLines = 2)
-                                    if (!searchLoading && (searchResults.isEmpty() || searchFailures.isNotEmpty())) {
+                                    if (!searchLoading && (visibleSearchResults.isEmpty() || searchFailures.isNotEmpty())) {
                                         Spacer(Modifier.height(10.dp))
-                                        FocusButton("重新搜索", onClick = { search(searchedTerm) })
+                                        FocusButton("重新搜索", tab = true, onClick = { search(searchedTerm) })
                                     }
                                 }
                             }
                         }
-                        items(searchResults, key = { "${it.sourceUrl}:${it.id}" }) { video ->
+                        items(visibleSearchResults, key = { "${it.sourceUrl}:${it.id}" }) { video ->
                             PosterCard(video.title, video.poster, listOf(video.sourceName, video.remarks).filter { it.isNotBlank() }.joinToString(" · "), repository, onFocus = { usedNavigationToken = navigationToken }) { openDetail(video) }
                         }
                     } else if (section == "history") {
@@ -827,7 +864,7 @@ private fun TvApp(onExit: () -> Unit) {
                             Column {
                                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                     Label("播放记录 · ${history.size}", 24, white, Modifier.weight(1f), bold = true)
-                                    if (history.isNotEmpty()) FocusButton("删除全部", onClick = { confirmClearHistory = true })
+                                    if (history.isNotEmpty()) FocusButton("删除全部", tab = true, onClick = { confirmClearHistory = true })
                                 }
                                 if (history.isEmpty()) Label("还没有播放记录，播放影片后会出现在这里。", 18, muted, Modifier.padding(top = 16.dp))
                             }
@@ -857,7 +894,7 @@ private fun TvApp(onExit: () -> Unit) {
                                         Box(Modifier.fillMaxWidth(progress).fillMaxHeight().background(accent))
                                     }
                                 }
-                                FocusButton("删除", modifier = Modifier.focusRequester(deleteFocus).focusProperties { left = rowFocus }, onClick = {
+                                FocusButton("删除", tab = true, modifier = Modifier.focusRequester(deleteFocus).focusProperties { left = rowFocus }, onClick = {
                                     history = history.filterNot { it.key == entry.key }
                                     settings.history = history
                                     settings.removeDetail(entry.item)
@@ -1000,8 +1037,8 @@ private fun TvApp(onExit: () -> Unit) {
                     Label("删除全部播放记录？", 24, white, bold = true)
                     Label("这会同时清除所有影片的续播进度。", 17, muted)
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        FocusButton("取消", modifier = Modifier.focusRequester(cancelClearHistoryFocus), onClick = { confirmClearHistory = false })
-                        FocusButton("确认删除", onClick = {
+                        FocusButton("取消", tab = true, modifier = Modifier.focusRequester(cancelClearHistoryFocus), onClick = { confirmClearHistory = false })
+                        FocusButton("确认删除", tab = true, onClick = {
                             settings.clearHistory()
                             history = emptyList()
                             confirmClearHistory = false
@@ -1015,7 +1052,7 @@ private fun TvApp(onExit: () -> Unit) {
 }
 
 @Composable
-private fun LoadingIndicator(modifier: Modifier = Modifier) {
+internal fun LoadingIndicator(modifier: Modifier = Modifier) {
     val rotation by rememberInfiniteTransition(label = "loading").animateFloat(
         initialValue = 0f,
         targetValue = 360f,
@@ -1076,7 +1113,17 @@ private fun SearchInput(value: String, onChange: (String) -> Unit, hint: String,
     var focused by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf(false) }
     var keyboardRequest by remember { mutableIntStateOf(0) }
+    var fieldValue by remember { mutableStateOf(TextFieldValue(value, selection = TextRange(value.length))) }
     val keyboard = LocalSoftwareKeyboardController.current
+    fun beginEditing() {
+        // 触屏点击和遥控器确认共用入口，避免只处理按键时平板无法唤起输入法。
+        fieldValue = fieldValue.copy(selection = TextRange(fieldValue.text.length))
+        editing = true
+        keyboardRequest++
+    }
+    LaunchedEffect(value) {
+        if (fieldValue.text != value) fieldValue = TextFieldValue(value, selection = TextRange(value.length))
+    }
     LaunchedEffect(keyboardRequest) {
         if (keyboardRequest > 0) {
             // 先让输入框切换为可编辑状态，再主动打开电视输入法。
@@ -1093,11 +1140,12 @@ private fun SearchInput(value: String, onChange: (String) -> Unit, hint: String,
             .padding(horizontal = 18.dp, vertical = 13.dp),
     ) {
         BasicTextField(
-            value = value,
-            onValueChange = onChange,
+            value = fieldValue,
+            onValueChange = { fieldValue = it; onChange(it.text) },
             readOnly = !editing,
             singleLine = true,
             textStyle = TextStyle(color = white, fontSize = 18.sp),
+            cursorBrush = SolidColor(Color(0xFFFFC15E)),
             keyboardOptions = KeyboardOptions(imeAction = action, showKeyboardOnFocus = false),
             keyboardActions = KeyboardActions(
                 onSearch = { editing = false; keyboard?.hide(); onSubmit() },
@@ -1105,13 +1153,20 @@ private fun SearchInput(value: String, onChange: (String) -> Unit, hint: String,
             ),
             modifier = Modifier.fillMaxWidth()
                 .onFocusChanged { focused = it.isFocused; if (!it.isFocused) editing = false }
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            if (event.type == PointerEventType.Release && !editing) beginEditing()
+                        }
+                    }
+                }
                 .onPreviewKeyEvent { event ->
                     val code = event.nativeKeyEvent.keyCode
                     if (event.type == KeyEventType.KeyDown && event.nativeKeyEvent.repeatCount == 0 &&
                         (code == android.view.KeyEvent.KEYCODE_DPAD_CENTER || code == android.view.KeyEvent.KEYCODE_ENTER || code == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER)
                     ) {
-                        editing = true
-                        keyboardRequest++
+                        beginEditing()
                         true
                     } else false
                 },

@@ -42,13 +42,16 @@ npm run dist:android
 
 调试签名 APK 输出到 `android/app/build/outputs/apk/debug/app-debug.apk`，可安装到 Android 手机、平板。安卓端在原生 SQLite 中保存设置和播放记录，支持跟随设备旋转、手机端顶部分类与底部四入口、本机播放和 DLNA 投屏。手机与电视需连接同一局域网，电视需支持并开启 DLNA 视频接收。桌面版数据库不会自动同步到安卓端，首次使用需重新导入点播源。
 
+在 Windows 上双击 `build-install-android.cmd`，可一键构建网页资源、同步 Android 工程、编译 release 签名 APK 并覆盖安装到唯一已连接的设备。脚本默认使用项目根目录下的 `android-sdk/`（已加入 Git 忽略），也支持 `ANDROID_HOME` 或 `ANDROID_SDK_ROOT`；连接多台设备时运行 `./build-install-android.cmd -DeviceId '设备编号'`，其他 SDK 位置可加 `-AndroidSdk 'D:\Android\Sdk'`。需要仓库根目录的 `videoclient-release.jks` 和 `signing-password.txt`，或使用 `ANDROID_KEYSTORE_PATH` 与 `ANDROID_KEYSTORE_PASSWORD`。脚本会核对 release 证书指纹，安装包位于 `android/app/build/outputs/apk/release/app-release.apk`；覆盖安装不会清除应用数据。
+
 搜索框会在各端分别保存最近 10 条搜索，可点选重搜、逐条删除或清空；记录保存在各设备本地，不跨设备同步。
+搜索提交时会去掉首尾空格、把连续空格合并为一个，并用整理后的完整内容查询点播源。各端设置页的“精确搜索”默认关闭；开启后，如果搜索内容包含空格，只取第一段作为结果筛选关键词，例如“牧神记 年番3”会提交完整内容搜索，但结果仅显示片名包含“牧神记”的影片。关闭后恢复显示源返回的全部结果。
 
 ### 原生 Android 电视端
 
 `android-tv/` 是独立的 Kotlin / Compose 电视应用，不依赖手机端 WebView，最低支持 Android 8.0（API 26），包名为 `com.shuxian.videoclient.tv`，可与手机端同时安装。电视首页顶部为搜索框和设置，下面是电影、电视、综艺、自定义和播放记录菜单。电影和电视保留豆瓣推荐分类标签，综艺沿用豆瓣综艺推荐；自定义菜单保留点播源返回的父分类和子分类。
 
-首次使用在设置中填写 `vod.json` 订阅地址并导入。自定义菜单默认使用第一个已启用的非限制源，也可以在设置中选择其他源；搜索会查询所有已启用的非限制源。设置中不提供并发数输入，搜索内部最多同时请求 6 个源。列表向下翻时自动加载下一页，顶部菜单随列表滚动，返回键可直接回到当前列表顶部。详情页支持选择线路和集数，使用 Media3 原生播放器播放 HLS / MP4；遥控器左右键每次快退或快进 20 秒，播放器内可切换线路、选集和播放下一集，当前线路失败时会尝试同集的其他线路。播放记录保存在电视本机，可继续播放或删除；继续播放会先读取本机缓存的线路和集数，再在后台更新详情，记录卡片显示观看进度。播放器中遥控器返回键回到选集。电视端设置与播放记录不与手机或桌面同步。
+首次使用在设置中填写 `vod.json` 订阅地址并导入。成人源默认不启用，但可在设置列表中手动启用并选为自定义源；自定义菜单默认使用第一个已启用的源，也可以在设置中选择其他源。搜索只查询已启用的非成人源。设置中不提供并发数输入，搜索内部最多同时请求 6 个源。列表向下翻时自动加载下一页，顶部菜单随列表滚动，返回键可直接回到当前列表顶部。详情页支持选择线路和集数，使用 Media3 原生播放器播放 HLS / MP4；遥控器左右键每次快退或快进 20 秒，播放器内可切换线路、选集和播放下一集，当前线路失败时会尝试同集的其他线路。播放记录保存在电视本机，可继续播放或删除；继续播放会先读取本机缓存的线路和集数，再在后台更新详情，记录卡片显示观看进度。播放器中遥控器返回键回到选集。电视端设置与播放记录不与手机或桌面同步。
 
 需要 JDK 21、Android SDK Platform 36 和 Build Tools 35.0.0。在 Windows 上运行 `npm run dist:android-tv`，调试 APK 输出到 `android-tv/app/build/outputs/apk/debug/app-debug.apk`。发布标签的 GitHub Actions 也会生成 `videoClient-vX.Y.Z-android-tv.apk`。
 

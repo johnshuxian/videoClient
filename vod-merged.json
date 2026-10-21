@@ -1,0 +1,104 @@
+{
+  "sources": [
+    {
+      "name": "如意",
+      "url": "https://www.ryzyw.com/api.php/provide/vod",
+      "isAdult": false
+    },
+    {
+      "name": "暴风",
+      "url": "https://bfzyapi.com/api.php/provide/vod/",
+      "isAdult": false
+    },
+    {
+      "name": "360",
+      "url": "https://360zy.com/api.php/provide/vod/",
+      "isAdult": false
+    },
+    {
+      "name": "量子",
+      "url": "https://cj.lziapi.com/api.php/provide/vod/",
+      "isAdult": false
+    },
+    {
+      "name": "U酷",
+      "url": "https://api.ukuapi88.com/api.php/provide/vod/",
+      "isAdult": false
+    },
+    {
+      "name": "极速",
+      "url": "https://jszyapi.com/api.php/provide/vod/",
+      "isAdult": false
+    },
+    {
+      "name": "非凡",
+      "url": "https://cj.ffzyapi.com/api.php/provide/vod/",
+      "isAdult": false
+    },
+    {
+      "name": "虎牙",
+      "url": "https://www.huyaapi.com/api.php/provide/vod/",
+      "isAdult": false
+    },
+    {
+      "name": "魔都",
+      "url": "https://caiji.moduapi.cc/api.php/provide/vod/",
+      "isAdult": false
+    },
+    {
+      "name": "爱奇艺资源",
+      "url": "https://iqiyizyapi.com/api.php/provide/vod",
+      "isAdult": false
+    },
+    {
+      "name": "红牛备用",
+      "url": "https://www.hongniuzy3.com/api.php/provide/vod",
+      "isAdult": false
+    },
+    {
+      "name": "金鹰点播",
+      "url": "https://jinyingzy.com/api.php/provide/vod",
+      "isAdult": false
+    },
+    {
+      "name": "猫眼资源",
+      "url": "https://api.maoyanapi.top/api.php/provide/vod",
+      "isAdult": false
+    },
+    {
+      "name": "墨斗",
+      "url": "https://www.mdzyapi.com/api.php/provide/vod/",
+      "isAdult": false
+    },
+    {
+      "name": "最大",
+      "url": "http://zuidazy.me/api.php/provide/vod/",
+      "isAdult": false
+    },
+    {
+      "name": "新浪",
+      "url": "https://api.xinlangapi.com/xinlangapi.php/provide/vod/",
+      "isAdult": false
+    },
+    {
+      "name": "红牛资源",
+      "url": "https://www.hongniuzy2.com/api.php/provide/vod/",
+      "isAdult": false
+    },
+    {
+      "name": "百度资源",
+      "url": "https://api.apibdzy.com/api.php/provide/vod/?ac=list",
+      "isAdult": false
+    },
+    {
+      "name": "光速资源",
+      "url": "https://api.guangsuapi.com/api.php/provide/vod/from/gsm3u8/",
+      "isAdult": false
+    },
+    {
+      "name": "ckzy（成人源）",
+      "url": "https://ckzy.me/api.php/provide/vod/?ac=list",
+      "isAdult": true
+    }
+  ]
+}
