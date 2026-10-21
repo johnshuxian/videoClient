@@ -21,7 +21,6 @@ import {
   Settings2,
   ShieldCheck,
   SkipForward,
-  Sparkles,
   Square,
   Sun,
   Moon,
@@ -174,29 +173,6 @@ function PosterImage({
       }}
     />
   ) : null;
-}
-
-function HeroPoster({
-  item,
-  ratingSource,
-}: {
-  item: CatalogItem;
-  ratingSource: string;
-}) {
-  return (
-    <div className="hero-poster">
-      <PosterImage src={item.poster} loading="eager" />
-      <div className="hero-poster-label">
-        <span>今日推荐</span>
-        <strong>{item.title}</strong>
-        {item.rating && (
-          <small>
-            ★ {item.rating} {ratingSource}评分
-          </small>
-        )}
-      </div>
-    </div>
-  );
 }
 
 function enableMobilePlaybackGestures(art: Artplayer) {
@@ -959,13 +935,13 @@ export default function App() {
     }, 260);
   }
 
-  function closeDetail() {
+  function closeDetail(immediate = false) {
     if (detailClosing) return;
     ++detailSerial.current;
     if (castingDevice)
       void saveCastProgress().finally(() => window.videoAPI.castStop().catch(() => {}));
     setCastingDevice(null);
-    if (!animatePageExit()) {
+    if (immediate || !animatePageExit()) {
       setSelected(null);
       setDetail(null);
       setEpisode(null);
@@ -1835,7 +1811,6 @@ export default function App() {
     }
   }
 
-  const featured = catalog[0];
   const categoryName = {
     movie: "电影",
     tv: "剧集",
@@ -2118,37 +2093,6 @@ export default function App() {
           <main className="content">
             {section === "home" && (
               <>
-                <section className="hero">
-                  <div className="hero-glow" />
-                  <div className="hero-copy">
-                    <div className="eyebrow">
-                      <Sparkles size={14} />{" "}
-                      豆瓣精选 · 每日发现
-                    </div>
-                    <h1>
-                      光影之间，
-                      <br />
-                      <em>遇见好故事。</em>
-                    </h1>
-                    <p>
-                      电影、剧集与综艺，随心探索。想看的，点开就能找。
-                    </p>
-                    <button
-                      className="hero-button"
-                      onClick={() => featured && searchFor(featured.title)}
-                      disabled={!featured}
-                    >
-                      <Play size={16} fill="currentColor" /> 看看推荐{" "}
-                      <ArrowRight size={17} />
-                    </button>
-                  </div>
-                  {featured && (
-                    <HeroPoster
-                      item={featured}
-                      ratingSource="豆瓣"
-                    />
-                  )}
-                </section>
                 <section className="catalog-section">
                   <div className="section-heading">
                     <div>
@@ -2949,21 +2893,30 @@ export default function App() {
                                 {detail.title} <small>· {playing.label}</small>
                               </h2>
                             </div>
-                            {!casting && (
-                              <div className="player-actions">
-                                <button onClick={scanDevices}>
-                                  <MonitorPlay size={17} /> 投屏
-                                </button>
-                                {episode + 1 <
-                                  detail.lines[line].episodes.length && (
-                                  <button
-                                    onClick={playNextEpisode}
-                                  >
-                                    <SkipForward size={17} /> 下一集
+                            <div className="player-actions">
+                              <button
+                                onClick={() => {
+                                  // 离开播放器后立即卸载详情，避免关闭动画覆盖搜索结果。
+                                  closeDetail(true);
+                                  void searchFor(detail.title);
+                                }}
+                              >
+                                <Search size={17} /> 搜索更多
+                              </button>
+                              {!casting && (
+                                <>
+                                  <button onClick={scanDevices}>
+                                    <MonitorPlay size={17} /> 投屏
                                   </button>
-                                )}
-                              </div>
-                            )}
+                                  {episode + 1 <
+                                    detail.lines[line].episodes.length && (
+                                    <button onClick={playNextEpisode}>
+                                      <SkipForward size={17} /> 下一集
+                                    </button>
+                                  )}
+                                </>
+                              )}
+                            </div>
                           </div>
                           {castError && !castOpen && !casting && (
                             <div className="notice error">{castError}</div>

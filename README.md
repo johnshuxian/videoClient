@@ -53,7 +53,9 @@ npm run dist:android
 
 首次使用在设置中填写 `vod.json` 订阅地址并导入。成人源默认不启用，但可在设置列表中手动启用并选为自定义源；自定义菜单默认使用第一个已启用的源，也可以在设置中选择其他源。搜索只查询已启用的非成人源。设置中不提供并发数输入，搜索内部最多同时请求 6 个源。列表向下翻时自动加载下一页，顶部菜单随列表滚动，返回键可直接回到当前列表顶部。详情页支持选择线路和集数，使用 Media3 原生播放器播放 HLS / MP4；遥控器左右键每次快退或快进 20 秒，播放器内可切换线路、选集和播放下一集，当前线路失败时会尝试同集的其他线路。播放记录保存在电视本机，可继续播放或删除；继续播放会先读取本机缓存的线路和集数，再在后台更新详情，记录卡片显示观看进度。播放器中遥控器返回键回到选集。电视端设置与播放记录不与手机或桌面同步。
 
-需要 JDK 21、Android SDK Platform 36 和 Build Tools 35.0.0。在 Windows 上运行 `npm run dist:android-tv`，调试 APK 输出到 `android-tv/app/build/outputs/apk/debug/app-debug.apk`。发布标签的 GitHub Actions 也会生成 `videoClient-vX.Y.Z-android-tv.apk`。
+电视端播放点播 HLS 时会过滤带广告标记或广告路径名的片段；直播 HLS、字节范围清单和 MP4 保持原有播放方式。
+
+需要 JDK 21、Android SDK Platform 36 和 Build Tools 35.0.0，并配置 release 签名。在 Windows 上运行 `npm run dist:android-tv`，签名 APK 输出到 `android-tv/app/build/outputs/apk/release/app-release.apk`。发布标签的 GitHub Actions 也会生成 `videoClient-vX.Y.Z-android-tv.apk`。
 
 ### HarmonyOS 7 适配工程
 
@@ -67,7 +69,7 @@ npm run sync:harmony
 
 在 Windows 上安装 PowerShell 7 并完成一次签名配置后，可连接并解锁手机，双击仓库根目录的 `build-install-harmony.cmd` 一键同步网页资源、编译签名 HAP 并覆盖安装。脚本会自动使用本机 `E:\mysoft\DevEco Studio` 或 `DEVECO_HOME` 指向的 DevEco Studio；其他安装位置可在 PowerShell 7 中运行 `./scripts/build-install-harmony.ps1 -DevEcoHome 'D:\DevEco Studio'`。连接多台设备时另加 `-DeviceId '设备编号'`，设备编号可通过 `hdc list targets -v` 查看。签名 HAP 保存在 `harmony/entry/build/default/outputs/default/entry-default-signed.hap`；脚本不会清除手机应用数据。
 
-鸿蒙工程已接入首页、点播源请求、搜索、本地设置、图片和视频的本机代理，以及 DLNA 搜索、投屏与进度查询。进入播放页后在详情页内自动播放，手动点击全屏时仅播放器横向铺满屏幕并隐藏系统栏，页面方向保持不变；浅色和深色模式同步设置状态栏、导航栏颜色。鸿蒙端设置使用 ArkWeb 本地存储，与安卓 SQLite 数据互不迁移。HLS 广告过滤暂未移植。
+鸿蒙工程已接入首页、点播源请求、搜索、本地设置、图片和视频的本机代理，以及 DLNA 搜索、投屏与进度查询。进入播放页后在详情页内自动播放，手动点击全屏时仅播放器横向铺满屏幕并隐藏系统栏，页面方向保持不变；浅色和深色模式同步设置状态栏、导航栏颜色。鸿蒙端设置使用 ArkWeb 本地存储，与安卓 SQLite 数据互不迁移。点播 HLS 清单会过滤带广告标记或广告路径名的片段；直播和字节范围清单保留原样。
 
 API 26 工程已通过 DevEco Studio 26.0.0 编译与调试签名；真机已验证海报和视频经代理加载。DLNA 仍需在同一局域网的电视上做投屏验收。
 

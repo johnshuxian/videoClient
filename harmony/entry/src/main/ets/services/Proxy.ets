@@ -6,6 +6,59 @@ import { lanNetwork } from './Lan';
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125 Safari/537.36';
 const encoder = new util.TextEncoder();
 const decoder = new util.TextDecoder('utf-8');
+const AD_PATH_HINT = /(?:^|[/_?&=-])(?:ad|ads|advert|advertise|commercial|preroll)(?:$|[/_?&=.-])/i;
+const AD_DATE_RANGE = /\bCLASS\s*=\s*"?(?:ad|advert)/i;
+
+function filterHlsAdSegments(manifest: string): string {
+  // 直播清单会持续变更序号，字节范围清单可能依赖前一片段的偏移，先保持原样。
+  if (!manifest.includes('#EXT-X-ENDLIST') || manifest.includes('#EXT-X-BYTERANGE')) return manifest;
+
+  const output: string[] = [];
+  let dateRangeAd = false;
+  let cueAd = false;
+  let segmentStart = -1;
+  let skipSegment = false;
+  let keptSegments = 0;
+  let removedSegments = 0;
+
+  for (const line of manifest.replace(/\r/g, '').split('\n')) {
+    if (line.startsWith('#EXT-X-DATERANGE') && AD_DATE_RANGE.test(line)) {
+      dateRangeAd = true;
+      continue;
+    }
+    if (line.startsWith('#EXT-X-CUE-OUT')) {
+      cueAd = true;
+      continue;
+    }
+    if (line.startsWith('#EXT-X-CUE-IN')) {
+      cueAd = false;
+      continue;
+    }
+    if (line === '#EXT-X-DISCONTINUITY') dateRangeAd = false;
+    if (line.startsWith('#EXTINF')) {
+      segmentStart = output.length;
+      skipSegment = dateRangeAd || cueAd;
+    }
+
+    if (line && !line.startsWith('#') && segmentStart >= 0) {
+      // 只检查片段路径，避免签名参数中出现 ad 字段时误删正片。
+      if (skipSegment || AD_PATH_HINT.test(line.split(/[?#]/)[0])) {
+        output.splice(segmentStart);
+        removedSegments++;
+      } else {
+        output.push(line);
+        keptSegments++;
+      }
+      segmentStart = -1;
+      skipSegment = false;
+    } else {
+      output.push(line);
+    }
+  }
+
+  // 全部片段都被判为广告时，回退原清单，优先保证播放。
+  return removedSegments > 0 && keptSegments > 0 ? output.join('\n') : manifest;
+}
 
 export class Proxy {
   private server = socket.constructTCPSocketServerInstance();
@@ -112,7 +165,9 @@ export class Proxy {
         const base = url.URL.parseURL(target);
         // 电视请求到达时取该连接的本机地址，HLS 分片才能继续从手机读取。
         const host = (await client.getLocalAddress()).address;
-        const rewritten = String(response.result).replace(/URI="([^"]+)"|^(?!#|\s*$)(.+)$/gm, (match, nested: string, line: string) => {
+        const original = String(response.result);
+        const filtered = local.params.get('ads') === '1' ? filterHlsAdSegments(original) : original;
+        const rewritten = filtered.replace(/URI="([^"]+)"|^(?!#|\s*$)(.+)$/gm, (match, nested: string, line: string) => {
           const source = url.URL.parseURL(nested || line, base).toString();
           const address = `http://${host}:${this.port}/${this.token}/stream?url=${encodeURIComponent(source)}&ads=${local.params.get('ads') || '0'}`;
           return nested ? `URI="${address}"` : address;

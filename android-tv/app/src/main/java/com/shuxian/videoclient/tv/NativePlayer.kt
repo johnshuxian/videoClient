@@ -71,6 +71,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import androidx.lifecycle.Lifecycle
@@ -134,8 +135,8 @@ fun NativePlayer(
         val http = DefaultHttpDataSource.Factory()
             .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125 Safari/537.36")
             .setDefaultRequestProperties(mapOf("Referer" to referer))
-        val mediaSource = DefaultMediaSourceFactory(context)
-            .setDataSourceFactory(DefaultDataSource.Factory(context, http))
+        val dataSource = DefaultDataSource.Factory(context, http)
+        val mediaSource = DefaultMediaSourceFactory(context).setDataSourceFactory(dataSource)
         ExoPlayer.Builder(context)
             .setMediaSourceFactory(mediaSource)
             .setSeekBackIncrementMs(20_000)
@@ -144,8 +145,13 @@ fun NativePlayer(
                 val item = MediaItem.Builder().setUri(url)
                 if (Regex("\\.m3u8(?:$|[?#])", RegexOption.IGNORE_CASE).containsMatchIn(url)) {
                     item.setMimeType(MimeTypes.APPLICATION_M3U8)
+                    // 只在 HLS 清单解析时过滤广告片段，MP4 和视频分片继续直接取流。
+                    setMediaSource(HlsMediaSource.Factory(dataSource)
+                        .setPlaylistParserFactory(AdFilteringHlsPlaylistParserFactory())
+                        .createMediaSource(item.build()))
+                } else {
+                    setMediaItem(item.build())
                 }
-                setMediaItem(item.build())
                 if (startPositionMs > 0L) seekTo(startPositionMs)
                 prepare()
                 // 地址解析可能在应用退到后台后才完成，新建播放器也应保持暂停。

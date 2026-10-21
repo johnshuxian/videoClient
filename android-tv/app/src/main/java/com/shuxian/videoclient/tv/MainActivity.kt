@@ -71,6 +71,7 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.geometry.Offset
@@ -88,6 +89,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
@@ -619,12 +623,35 @@ private fun TvApp(onExit: () -> Unit) {
                         }
                         Spacer(Modifier.height(22.dp))
                         val episodes = current.lines.getOrNull(lineIndex)?.episodes.orEmpty()
-                        FocusButton("立刻播放", selected = true, enabled = episodes.isNotEmpty(), tab = true, modifier = Modifier.focusRequester(detailPlayFocus), onClick = {
-                            val saved = history.firstOrNull { it.key == selectedVideo?.let { video -> "${video.sourceUrl}:${video.id}" } }
-                            val matched = saved?.let { matchingEpisode(current, it.lineName, it.lineIndex, it.episodeLabel, it.episodeIndex) }
-                            if (matched != null) play(matched.second, matched.first, startPositionMs = saved?.positionMs ?: 0L)
-                            else play(0, lineIndex)
-                        })
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            FocusButton("立刻播放", selected = true, enabled = episodes.isNotEmpty(), tab = true, modifier = Modifier.focusRequester(detailPlayFocus), onClick = {
+                                val saved = history.firstOrNull { it.key == selectedVideo?.let { video -> "${video.sourceUrl}:${video.id}" } }
+                                val matched = saved?.let { matchingEpisode(current, it.lineName, it.lineIndex, it.episodeLabel, it.episodeIndex) }
+                                if (matched != null) play(matched.second, matched.first, startPositionMs = saved?.positionMs ?: 0L)
+                                else play(0, lineIndex)
+                            })
+                            var searchFocused by remember { mutableStateOf(false) }
+                            val searchShape = RoundedCornerShape(8.dp)
+                            // 详情页只显示图标，遥控器焦点仍沿用按钮的描边和短横杠。
+                            Column(
+                                Modifier.onFocusChanged { searchFocused = it.isFocused }
+                                    .scale(if (searchFocused) 1.06f else 1f)
+                                    .border(3.dp, if (searchFocused) white else Color.Transparent, searchShape)
+                                    .semantics { contentDescription = "搜索更多" }
+                                    .clickable { search(current.title) }
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Image(
+                                    painter = painterResource(R.drawable.tv_search),
+                                    contentDescription = null,
+                                    colorFilter = ColorFilter.tint(if (searchFocused) accent else white),
+                                    modifier = Modifier.size(24.dp),
+                                )
+                                Spacer(Modifier.height(5.dp))
+                                Box(Modifier.width(28.dp).height(3.dp).clip(RoundedCornerShape(3.dp)).background(if (searchFocused) accent else Color.Transparent))
+                            }
+                        }
                         Spacer(Modifier.height(18.dp))
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             Label("选集", 20, white, Modifier.weight(1f), bold = true)
@@ -669,7 +696,7 @@ private fun TvApp(onExit: () -> Unit) {
                     Spacer(Modifier.height(10.dp))
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         SearchInput(subscriptionInput, { subscriptionInput = it }, "粘贴订阅地址", Modifier.weight(1f), ImeAction.Done) {}
-                        FocusButton(if (importing) "正在导入" else "导入 / 更新", enabled = !importing, modifier = Modifier.focusRequester(settingsImportFocus), onClick = {
+                        FocusButton(if (importing) "正在导入" else "导入 / 更新", enabled = !importing, tab = true, modifier = Modifier.focusRequester(settingsImportFocus), onClick = {
                             importing = true
                             settingsError = ""
                             settingsMessage = ""
@@ -725,7 +752,8 @@ private fun TvApp(onExit: () -> Unit) {
                                     Label(source.url, 13, muted, maxLines = 1)
                                 }
                                 if (source.isAdult) Label("成人源", 14, muted)
-                                FocusButton(if (source.enabled) "✓ 已启用" else "启用", selected = source.enabled, onClick = {
+                                // 两列操作保持固定宽度，状态文字长短变化时按钮和短横杠仍能逐行对齐。
+                                FocusButton(if (source.enabled) "已启用" else "启用", selected = source.enabled, tab = true, modifier = Modifier.width(130.dp), onClick = {
                                     sources = sources.map { if (it.url == source.url) it.copy(enabled = !it.enabled) else it }
                                     settings.sources = sources
                                     val chosen = sources.firstOrNull { it.url == selectedSourceUrl && it.enabled }
@@ -736,7 +764,7 @@ private fun TvApp(onExit: () -> Unit) {
                                     page = 0
                                     videos = emptyList()
                                 })
-                                FocusButton(if (selectedSource?.url == source.url) "● 自定义源" else "选为自定义源", selected = selectedSource?.url == source.url, enabled = source.enabled, onClick = {
+                                FocusButton(if (selectedSource?.url == source.url) "自定义源" else "选为自定义源", selected = selectedSource?.url == source.url, enabled = source.enabled, tab = true, modifier = Modifier.width(170.dp), onClick = {
                                     selectedSourceUrl = source.url
                                     settings.selectedSourceUrl = source.url
                                     categoryId = null
@@ -789,7 +817,28 @@ private fun TvApp(onExit: () -> Unit) {
                                     Label("搜索电影、电视、综艺", 18, if (searchFocused) white else muted, maxLines = 1)
                                 }
                                 Spacer(Modifier.weight(1f))
-                                FocusButton("设置", tab = true, modifier = Modifier.focusProperties { down = menuFocus.getValue(lastFocusedMenu) }, onClick = { settingsReturnScreen = screen; screen = "settings" })
+                                var settingsFocused by remember { mutableStateOf(false) }
+                                val settingsShape = RoundedCornerShape(8.dp)
+                                // 齿轮入口沿用首页按钮的白色焦点框和橙色短横杠。
+                                Column(
+                                    Modifier.focusProperties { down = menuFocus.getValue(lastFocusedMenu) }
+                                        .onFocusChanged { settingsFocused = it.isFocused }
+                                        .scale(if (settingsFocused) 1.06f else 1f)
+                                        .border(3.dp, if (settingsFocused) white else Color.Transparent, settingsShape)
+                                        .semantics { contentDescription = "设置" }
+                                        .clickable { settingsReturnScreen = screen; screen = "settings" }
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                ) {
+                                    Image(
+                                        painter = painterResource(R.drawable.tv_settings),
+                                        contentDescription = null,
+                                        colorFilter = ColorFilter.tint(if (settingsFocused) accent else white),
+                                        modifier = Modifier.size(24.dp),
+                                    )
+                                    Spacer(Modifier.height(5.dp))
+                                    Box(Modifier.width(28.dp).height(3.dp).clip(RoundedCornerShape(3.dp)).background(if (settingsFocused) accent else Color.Transparent))
+                                }
                             }
                             Spacer(Modifier.height(20.dp))
                             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1098,7 +1147,7 @@ fun FocusButton(label: String, selected: Boolean = false, enabled: Boolean = tru
     ) {
         if (tab) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Label(label, 18, if (selected || focused) accent else white, bold = selected || focused)
+                Label(label, 18, if (!enabled) muted else if (selected || focused) accent else white, bold = selected || focused)
                 Spacer(Modifier.height(5.dp))
                 Box(Modifier.width(28.dp).height(3.dp).clip(RoundedCornerShape(3.dp)).background(if (selected || focused) accent else Color.Transparent))
             }
