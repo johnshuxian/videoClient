@@ -61,17 +61,27 @@ public class DlnaPlugin extends Plugin {
         final String name;
         final String host;
         final URL control;
-        final Network network;
         final String serviceType;
 
-        Renderer(String id, String name, String host, URL control, Network network, String serviceType) {
+        Renderer(String id, String name, String host, URL control, String serviceType) {
             this.id = id;
             this.name = name;
             this.host = host;
             this.control = control;
-            this.network = network;
             this.serviceType = serviceType;
         }
+    }
+
+    // 发现和控制请求都走当前局域网；不要长期持有可能在锁屏后失效的 Network。
+    private Network currentLanNetwork() {
+        ConnectivityManager connectivity = (ConnectivityManager) getContext().getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (connectivity == null) return null;
+        for (Network network : connectivity.getAllNetworks()) {
+            NetworkCapabilities capabilities = connectivity.getNetworkCapabilities(network);
+            if (capabilities != null && (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+                    || capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))) return network;
+        }
+        return null;
     }
 
     @PluginMethod
@@ -82,18 +92,7 @@ public class DlnaPlugin extends Plugin {
             int descriptionErrors = 0;
             WifiManager wifi = (WifiManager) getContext().getApplicationContext().getSystemService(Context.WIFI_SERVICE);
             WifiManager.MulticastLock lock = wifi == null ? null : wifi.createMulticastLock("videoclient-dlna");
-            ConnectivityManager connectivity = (ConnectivityManager) getContext().getSystemService(Context.CONNECTIVITY_SERVICE);
-            Network lanNetwork = null;
-            if (connectivity != null) {
-                for (Network network : connectivity.getAllNetworks()) {
-                    NetworkCapabilities capabilities = connectivity.getNetworkCapabilities(network);
-                    if (capabilities != null && (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
-                            || capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))) {
-                        lanNetwork = network;
-                        break;
-                    }
-                }
-            }
+            Network lanNetwork = currentLanNetwork();
             if (lanNetwork == null) {
                 JSObject result = new JSObject();
                 result.put("items", new JSArray());
@@ -179,8 +178,7 @@ public class DlnaPlugin extends Plugin {
     private Renderer describe(String location, Network network) throws Exception {
         URL url = new URL(location);
         if (!url.getProtocol().equals("http") && !url.getProtocol().equals("https")) return null;
-        HttpURLConnection connection = (HttpURLConnection) (network == null
-                ? url.openConnection() : network.openConnection(url));
+        HttpURLConnection connection = (HttpURLConnection) network.openConnection(url);
         connection.setConnectTimeout(1800);
         connection.setReadTimeout(1800);
         try (InputStream input = connection.getInputStream()) {
@@ -194,7 +192,7 @@ public class DlnaPlugin extends Plugin {
                 String serviceType = text(service, "serviceType");
                 if (!serviceType.startsWith(SERVICE_PREFIX)) continue;
                 URL control = new URL(baseUrl, text(service, "controlURL"));
-                return new Renderer(location, name.isEmpty() ? url.getHost() : name, url.getHost(), control, network, serviceType);
+                return new Renderer(location, name.isEmpty() ? url.getHost() : name, url.getHost(), control, serviceType);
             }
             return null;
         } finally {
@@ -335,8 +333,9 @@ public class DlnaPlugin extends Plugin {
                 + "s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">"
                 + "<s:Body><u:" + action + " xmlns:u=\"" + renderer.serviceType + "\">"
                 + "<InstanceID>0</InstanceID>" + arguments + "</u:" + action + "></s:Body></s:Envelope>";
-        HttpURLConnection connection = (HttpURLConnection) (renderer.network == null
-                ? renderer.control.openConnection() : renderer.network.openConnection(renderer.control));
+        Network network = currentLanNetwork();
+        if (network == null) throw new IllegalStateException("局域网尚未恢复");
+        HttpURLConnection connection = (HttpURLConnection) network.openConnection(renderer.control);
         connection.setConnectTimeout(4000);
         connection.setReadTimeout(5000);
         connection.setRequestMethod("POST");

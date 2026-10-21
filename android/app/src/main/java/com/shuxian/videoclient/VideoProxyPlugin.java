@@ -21,7 +21,11 @@ import java.net.URL;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
@@ -33,7 +37,9 @@ import java.util.regex.Pattern;
 public class VideoProxyPlugin extends Plugin {
     private static final String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125 Safari/537.36";
     private static final Pattern NESTED_URI = Pattern.compile("URI=\"([^\"]+)\"");
-    private static final Pattern AD_HINT = Pattern.compile("(?:^|[/_?&=-])(ad|ads|advert|advertise|commercial|preroll)(?:[/_?&=.-]|$)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern AD_URL = Pattern.compile("adjump|advert|/ads?/", Pattern.CASE_INSENSITIVE);
+    private static final Pattern AD_DATE_RANGE = Pattern.compile("\\bCLASS\\s*=\\s*\"?(?:ad|advert)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern DURATION_TAG = Pattern.compile("^#EXTINF:([\\d.]+)");
     private final ExecutorService workers = Executors.newCachedThreadPool();
     private final String token = UUID.randomUUID().toString();
     private ServerSocket server;
@@ -174,26 +180,11 @@ public class VideoProxyPlugin extends Plugin {
 
     private String rewriteManifest(String body, URL base, boolean filterAds, String host) throws IOException {
         StringBuilder result = new StringBuilder();
-        boolean adBreak = false;
-        boolean skipSegment = false;
-        String previous = "";
-        for (String line : body.replace("\r", "").split("\n")) {
-            if (filterAds && line.startsWith("#EXT-X-DATERANGE") && line.toLowerCase().contains("class=\"ad")) {
-                adBreak = true;
-                continue;
-            }
-            if (line.startsWith("#EXT-X-DISCONTINUITY")) adBreak = false;
-            if (line.startsWith("#EXTINF")) skipSegment = filterAds && adBreak;
+        String filtered = filterAds ? filterAdSegments(body) : body;
+        for (String line : filtered.replace("\r", "").split("\n")) {
             if (!line.isEmpty() && !line.startsWith("#")) {
                 URL nested = new URL(base, line);
-                if (!skipSegment && !(filterAds && AD_HINT.matcher(nested.toString()).find())) {
-                    result.append(proxyAddress(nested.toString(), filterAds, host)).append('\n');
-                } else if (previous.startsWith("#EXTINF")) {
-                    int last = result.lastIndexOf(previous + "\n");
-                    if (last >= 0) result.delete(last, result.length());
-                }
-                skipSegment = false;
-                previous = line;
+                result.append(proxyAddress(nested.toString(), filterAds, host)).append('\n');
                 continue;
             }
             Matcher matcher = NESTED_URI.matcher(line);
@@ -203,10 +194,135 @@ public class VideoProxyPlugin extends Plugin {
                 matcher.appendReplacement(replaced, Matcher.quoteReplacement("URI=\"" + uri + "\""));
             }
             matcher.appendTail(replaced);
-            if (!skipSegment) result.append(replaced).append('\n');
-            previous = line;
+            result.append(replaced).append('\n');
         }
         return result.toString();
+    }
+
+    private static final class SegmentGroup {
+        final int start;
+        final int end;
+        final int disc;
+        final List<String> urls;
+        final double seconds;
+
+        SegmentGroup(int start, int end, int disc, List<String> urls, double seconds) {
+            this.start = start;
+            this.end = end;
+            this.disc = disc;
+            this.urls = urls;
+            this.seconds = seconds;
+        }
+    }
+
+    private List<SegmentGroup> scanGroups(List<String> lines) {
+        List<Integer> boundaries = new ArrayList<>();
+        boundaries.add(-1);
+        for (int i = 0; i < lines.size(); i++)
+            if (lines.get(i).trim().equals("#EXT-X-DISCONTINUITY")) boundaries.add(i);
+        boundaries.add(lines.size());
+
+        List<SegmentGroup> groups = new ArrayList<>();
+        for (int groupIndex = 0; groupIndex < boundaries.size() - 1; groupIndex++) {
+            int start = boundaries.get(groupIndex) + 1;
+            int end = boundaries.get(groupIndex + 1);
+            List<String> urls = new ArrayList<>();
+            double seconds = 0;
+            for (int i = start; i < end; i++) {
+                String line = lines.get(i).trim();
+                Matcher duration = DURATION_TAG.matcher(line);
+                if (duration.find()) seconds += Double.parseDouble(duration.group(1));
+                else if (!line.isEmpty() && !line.startsWith("#")) urls.add(line);
+            }
+            groups.add(new SegmentGroup(start, end, boundaries.get(groupIndex), urls, seconds));
+        }
+        return groups;
+    }
+
+    private List<String> removeGroups(List<String> lines, List<SegmentGroup> groups) {
+        boolean[] removed = new boolean[lines.size()];
+        for (SegmentGroup group : groups) {
+            if (group.disc >= 0) removed[group.disc] = true;
+            for (int i = group.start; i < group.end; i++) {
+                // 正片可能继续使用广告段的解密密钥或初始化片段。
+                String line = lines.get(i).trim();
+                if (!line.startsWith("#EXT-X-KEY:") && !line.startsWith("#EXT-X-MAP:") &&
+                        !line.equals("#EXT-X-ENDLIST")) removed[i] = true;
+            }
+        }
+        List<String> result = new ArrayList<>();
+        for (int i = 0; i < lines.size(); i++) if (!removed[i]) result.add(lines.get(i));
+        return result;
+    }
+
+    private String filterAdSegments(String body) {
+        List<String> lines = new ArrayList<>(Arrays.asList(body.replace("\r", "").split("\n", -1)));
+        List<SegmentGroup> groups = scanGroups(lines);
+        List<SegmentGroup> adGroups = new ArrayList<>();
+        for (SegmentGroup group : groups) {
+            if (group.disc < 0 || group.urls.isEmpty()) continue;
+            boolean allAd = true;
+            for (String url : group.urls) if (!AD_URL.matcher(url).find()) allAd = false;
+            if (allAd) adGroups.add(group);
+        }
+        lines = removeGroups(lines, adGroups);
+
+        groups = scanGroups(lines);
+        adGroups.clear();
+        for (int i = 1; i < groups.size() - 1; i++) {
+            SegmentGroup group = groups.get(i);
+            if (!group.urls.isEmpty() && group.seconds > 0 && group.seconds <= 30 &&
+                    groups.get(i - 1).seconds >= 120 && groups.get(i + 1).seconds >= 120)
+                adGroups.add(group);
+        }
+        lines = removeGroups(lines, adGroups);
+
+        groups = scanGroups(lines);
+        if (groups.size() > 2 && groups.get(0).urls.isEmpty()) {
+            SegmentGroup lead = groups.get(1);
+            if (!lead.urls.isEmpty() && lead.seconds > 0 && lead.seconds <= 90 && lead.urls.size() <= 20) {
+                List<Integer> otherSizes = new ArrayList<>();
+                for (int i = 2; i < groups.size(); i++) otherSizes.add(groups.get(i).urls.size());
+                Collections.sort(otherSizes);
+                int median = otherSizes.get(otherSizes.size() / 2);
+                if (groups.size() < 5 || Math.abs(lead.urls.size() - median) > Math.max(3, median * 0.5))
+                    lines = removeGroups(lines, Collections.singletonList(lead));
+            }
+        }
+
+        // 显式标记最后处理，避免删掉广告后把紧邻的短正片误判为另一个片头。
+        List<String> explicit = new ArrayList<>();
+        boolean adBreak = false;
+        int segmentStart = -1;
+        for (String line : lines) {
+            if (line.startsWith("#EXT-X-DATERANGE") && AD_DATE_RANGE.matcher(line).find()) {
+                adBreak = true;
+                continue;
+            }
+            if (line.trim().equals("#EXT-X-DISCONTINUITY")) adBreak = false;
+            if (line.startsWith("#EXTINF")) segmentStart = explicit.size();
+            if (!line.isEmpty() && !line.startsWith("#") && segmentStart >= 0) {
+                if (adBreak) explicit.subList(segmentStart, explicit.size()).clear();
+                else explicit.add(line);
+                segmentStart = -1;
+            } else explicit.add(line);
+        }
+        lines = explicit;
+        int firstSegment = -1;
+        for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i).trim();
+            if (!line.isEmpty() && !line.startsWith("#")) {
+                firstSegment = i;
+                break;
+            }
+        }
+        // 所有分片都被识别为广告时回退，避免产生无法播放的空清单。
+        if (firstSegment < 0) return body;
+        List<String> result = new ArrayList<>();
+        for (int i = 0; i < lines.size(); i++)
+            if (i >= firstSegment || !lines.get(i).trim().equals("#EXT-X-DISCONTINUITY"))
+                result.add(lines.get(i));
+        return String.join("\n", result);
     }
 
     private String proxyAddress(String target, boolean filterAds, String host) throws IOException {

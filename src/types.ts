@@ -65,6 +65,11 @@ declare global {
       platform: string;
       readSetting: (key: string) => unknown;
       saveSetting: (key: string, value: unknown) => void;
+      listHistory: () => HistoryItem[];
+      latestOtherSourceHistory: (title: string, sourceUrl: string) => Promise<HistoryItem | null>;
+      upsertHistory: (item: HistoryItem) => void;
+      deleteHistory: (key: string) => void;
+      clearHistory: () => void;
       catalog: (
         type: CatalogType,
         tag: string,

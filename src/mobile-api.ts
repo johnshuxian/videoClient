@@ -1,6 +1,7 @@
 import type {
   CatalogItem,
   CatalogType,
+  HistoryItem,
   SearchItem,
   Source,
   SourceCategory,
@@ -57,6 +58,11 @@ export type MobileServices = {
   ) => Promise<string>;
   loadSettings: () => Promise<Map<string, unknown>>;
   saveSetting: (key: string, value: unknown) => Promise<void>;
+  loadHistory: () => Promise<HistoryItem[]>;
+  latestOtherSourceHistory: (title: string, sourceUrl: string) => Promise<HistoryItem | null>;
+  upsertHistory: (item: HistoryItem) => Promise<void>;
+  deleteHistory: (key: string) => Promise<void>;
+  clearHistory: () => Promise<void>;
   proxy: VideoProxy;
   dlna: Dlna;
   statusBar: AppStatusBar;
@@ -168,6 +174,7 @@ export async function createMobileVideoAPI(
   const root = document.getElementById("root")!;
   root.dataset.startupStep = "读取本机设置";
   const settings = await native.loadSettings();
+  let historyItems = await native.loadHistory();
   // 首次安装默认浅色；已有设置仍优先，避免覆盖用户手动选择。
   const initialTheme =
     settings.get("color-theme") === "dark" ? "dark" : "light";
@@ -192,6 +199,30 @@ export async function createMobileVideoAPI(
       writes = writes
         .catch((error) => console.error("设置写入失败", error))
         .then(() => native.saveSetting(key, value));
+    },
+    listHistory: () => historyItems,
+    latestOtherSourceHistory: async (title, sourceUrl) => {
+      // 查询前等候已排队的进度写入，确保最新一条与页面状态一致。
+      await writes;
+      return native.latestOtherSourceHistory(title, sourceUrl);
+    },
+    upsertHistory: (item) => {
+      historyItems = [item, ...historyItems.filter((entry) => entry.key !== item.key)];
+      writes = writes
+        .catch((error) => console.error("数据写入失败", error))
+        .then(() => native.upsertHistory(item));
+    },
+    deleteHistory: (key) => {
+      historyItems = historyItems.filter((entry) => entry.key !== key);
+      writes = writes
+        .catch((error) => console.error("数据写入失败", error))
+        .then(() => native.deleteHistory(key));
+    },
+    clearHistory: () => {
+      historyItems = [];
+      writes = writes
+        .catch((error) => console.error("数据写入失败", error))
+        .then(() => native.clearHistory());
     },
     catalog: async (type: CatalogType, tag, page, sort) => {
       const cacheKey = `${type}:${tag}:${page}:${sort}`;

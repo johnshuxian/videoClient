@@ -98,6 +98,7 @@ fun NativePlayer(
     onSelectEpisode: (lineIndex: Int, episodeIndex: Int) -> Unit,
     onNextEpisode: () -> Unit,
     onProgress: (positionMs: Long, durationMs: Long) -> Unit,
+    onPlaybackStarted: () -> Unit,
     onPlaybackFailure: (reason: String, positionMs: Long) -> Unit,
 ) {
     val context = LocalContext.current
@@ -290,7 +291,10 @@ fun NativePlayer(
                 playbackPaused = !playWhenReady
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (isPlaying) reportPosition()
+                if (isPlaying) {
+                    onPlaybackStarted()
+                    reportPosition()
+                }
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
                 buffering = playbackState == Player.STATE_BUFFERING
@@ -317,6 +321,10 @@ fun NativePlayer(
         // prepare() 先于监听器注册，初始状态也需要同步，避免首帧已就绪时仍显示加载提示。
         buffering = player.playbackState == Player.STATE_IDLE || player.playbackState == Player.STATE_BUFFERING
         playbackPaused = !player.playWhenReady
+        if (player.isPlaying) {
+            onPlaybackStarted()
+            reportPosition()
+        }
         view.keepScreenOn = true
         onDispose {
             stopFastForward()
@@ -384,8 +392,8 @@ fun NativePlayer(
     }
     LaunchedEffect(player) {
         while (isActive) {
-            // 底栏进度由 Media3 自己刷新；续播记录每 15 秒保存一次，退出和暂停时另行即时保存。
-            delay(15_000)
+            // 底栏进度由 Media3 自己刷新；续播记录每 4 秒保存一次，退出和暂停时另行即时保存。
+            delay(4_000)
             if (player.isPlaying) reportPosition()
         }
     }

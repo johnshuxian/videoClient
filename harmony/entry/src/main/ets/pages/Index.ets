@@ -5,6 +5,7 @@ import { window } from '@kit.ArkUI';
 import { settings } from '@kit.BasicServicesKit';
 import { Proxy } from '../services/Proxy';
 import { Dlna, DevicesResult, CastProgress } from '../services/Dlna';
+import { SettingsStore, HistoryRow, SettingRow } from '../services/SettingsStore';
 
 interface ProxyAddress { url: string }
 interface CastResult { ok: boolean }
@@ -28,6 +29,10 @@ interface NetworkMessage {
   fullscreen?: boolean;
   brightness?: number;
   surface?: string;
+  history?: HistoryRow;
+  historyKey?: string;
+  sourceUrl?: string;
+  setting?: SettingRow;
 }
 
 @Entry
@@ -42,6 +47,7 @@ struct Index {
   private fullscreen = false;
   private surface = 'page';
   private oldOrientation = window.Orientation.UNSPECIFIED;
+  private storeReady?: Promise<SettingsStore>;
 
   aboutToAppear(): void {
     this.proxyReady = this.proxy.start();
@@ -82,11 +88,27 @@ struct Index {
             if (typeof value !== 'string') return;
             const message = JSON.parse(value) as NetworkMessage;
             try {
-              let data: string | number | ProxyAddress | DevicesResult | CastProgress | CastResult = '';
+              let data: string | number | ProxyAddress | DevicesResult | CastProgress | CastResult | HistoryRow[] | HistoryRow | SettingRow[] | null = '';
               if (message.action === 'exitApp') {
                 const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
                 await context.terminateSelf();
                 return;
+              } else if (message.action === 'settingsList' || message.action === 'settingsSave' ||
+                message.action === 'historyList' || message.action === 'historyLatestOtherSource' || message.action === 'historyUpsert' ||
+                message.action === 'historyDelete' || message.action === 'historyClear') {
+                if (!this.storeReady) {
+                  const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+                  this.storeReady = SettingsStore.open(context);
+                }
+                const store = await this.storeReady;
+                if (message.action === 'settingsList') data = await store.listSettings();
+                else if (message.action === 'settingsSave' && message.setting) await store.saveSetting(message.setting);
+                else if (message.action === 'historyList') data = await store.list();
+                else if (message.action === 'historyLatestOtherSource')
+                  data = await store.latestOtherSource(message.title || '', message.sourceUrl || '');
+                else if (message.action === 'historyUpsert' && message.history) await store.upsert(message.history);
+                else if (message.action === 'historyDelete') await store.delete(message.historyKey || '');
+                else if (message.action === 'historyClear') await store.clear();
               } else if (message.action === 'request') {
                 const task = http.createHttp();
                 try {

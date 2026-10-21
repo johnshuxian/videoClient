@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
+  filterAdSegments,
   parseEpisodes,
   rewriteManifest,
   videoUrlFromSharePage,
@@ -30,9 +31,9 @@ test("分享页中的转义视频地址被解析为可播放的绝对地址", ()
   );
 });
 
-test("HLS 子清单与分片走代理，带广告标记的片段被过滤", () => {
+test("HLS 子清单与分片走代理，整组广告地址被过滤", () => {
   const manifest =
-    '#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="key.bin"\n#EXTINF:5,\npart1.ts\n#EXTINF:3,\nads/pre-roll.ts\n#EXTINF:5,\npart2.ts\n#EXT-X-ENDLIST';
+    '#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="key.bin"\n#EXTINF:60,\npart1.ts\n#EXT-X-DISCONTINUITY\n#EXTINF:20,\nvideo/ads/pre-roll.ts\n#EXTINF:20,\nvideo/adjump/clip.ts\n#EXT-X-DISCONTINUITY\n#EXTINF:60,\npart2.ts\n#EXT-X-ENDLIST';
   const result = rewriteManifest(
     manifest,
     "https://video.test/show/index.m3u8",
@@ -42,5 +43,43 @@ test("HLS 子清单与分片走代理，带广告标记的片段被过滤", () =
   assert.match(result, /proxy:https:\/\/video.test\/show\/key.bin/);
   assert.match(result, /proxy:https:\/\/video.test\/show\/part1.ts/);
   assert.doesNotMatch(result, /pre-roll/);
+  assert.doesNotMatch(result, /adjump/);
   assert.equal((result.match(/#EXTINF/g) || []).length, 2);
+  assert.match(result, /#EXT-X-ENDLIST/);
+});
+
+test("末尾广告组删除后仍保留 ENDLIST", () => {
+  const manifest =
+    "#EXTM3U\n#EXTINF:60,\nmovie.ts\n#EXT-X-DISCONTINUITY\n#EXTINF:40,\nvideo/ads/outro.ts\n#EXT-X-ENDLIST";
+  const result = filterAdSegments(manifest);
+  assert.doesNotMatch(result, /outro\.ts/);
+  assert.match(result, /#EXT-X-ENDLIST/);
+});
+
+test("广告样式地址混在正片组时不按单片删除", () => {
+  const manifest =
+    "#EXTM3U\n#EXT-X-DISCONTINUITY\n#EXTINF:120,\nmovie.ts\n#EXTINF:5,\nads/clip.ts\n#EXT-X-DISCONTINUITY\n#EXTINF:120,\nnext.ts\n#EXT-X-ENDLIST";
+  assert.match(filterAdSegments(manifest), /ads\/clip\.ts/);
+});
+
+test("无地址特征的短片头和两长夹一短中插被过滤", () => {
+  const lead =
+    "#EXTM3U\n#EXT-X-DISCONTINUITY\n#EXTINF:15,\nintro.ts\n#EXT-X-DISCONTINUITY\n#EXTINF:120,\nmovie.ts\n#EXT-X-ENDLIST";
+  const middle =
+    "#EXTM3U\n#EXTINF:150,\nfirst.ts\n#EXT-X-DISCONTINUITY\n#EXTINF:20,\ninsert.ts\n#EXT-X-DISCONTINUITY\n#EXTINF:150,\nlast.ts\n#EXT-X-ENDLIST";
+  assert.doesNotMatch(filterAdSegments(lead), /intro\.ts/);
+  assert.match(filterAdSegments(lead), /movie\.ts/);
+  assert.doesNotMatch(filterAdSegments(middle), /insert\.ts/);
+  assert.match(filterAdSegments(middle), /#EXT-X-ENDLIST/);
+});
+
+test("普通短分组和显式 DATERANGE 标记分别按原有边界处理", () => {
+  const normal =
+    "#EXTM3U\n#EXT-X-DISCONTINUITY\n#EXTINF:20,\na.ts\n#EXT-X-DISCONTINUITY\n#EXTINF:20,\nb.ts\n#EXT-X-DISCONTINUITY\n#EXTINF:20,\nc.ts\n#EXT-X-DISCONTINUITY\n#EXTINF:20,\nd.ts\n#EXT-X-ENDLIST";
+  const marked =
+    '#EXTM3U\n#EXT-X-DATERANGE:CLASS="ad"\n#EXTINF:5,\nplain.ts\n#EXT-X-DISCONTINUITY\n#EXTINF:20,\nmovie.ts\n#EXT-X-DISCONTINUITY\n#EXTINF:20,\nnext.ts\n#EXT-X-ENDLIST';
+  assert.match(filterAdSegments(normal), /a\.ts/);
+  assert.doesNotMatch(filterAdSegments(marked), /plain\.ts/);
+  assert.match(filterAdSegments(marked), /movie\.ts/);
+  assert.match(filterAdSegments(marked), /next\.ts/);
 });

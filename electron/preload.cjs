@@ -7,6 +7,21 @@ contextBridge.exposeInMainWorld("videoAPI", {
     const error = ipcRenderer.sendSync("settings:save", key, value);
     if (error) throw new Error(error);
   },
+  listHistory: () => ipcRenderer.sendSync("history:read"),
+  latestOtherSourceHistory: (title, sourceUrl) =>
+    ipcRenderer.invoke("history:latest-other-source", title, sourceUrl),
+  upsertHistory: (item) => {
+    const error = ipcRenderer.sendSync("history:upsert", item);
+    if (error) throw new Error(error);
+  },
+  deleteHistory: (key) => {
+    const error = ipcRenderer.sendSync("history:delete", key);
+    if (error) throw new Error(error);
+  },
+  clearHistory: () => {
+    const error = ipcRenderer.sendSync("history:clear");
+    if (error) throw new Error(error);
+  },
   catalog: (type, tag, page, sort) =>
     ipcRenderer.invoke("catalog", type, tag, page, sort),
   sourceCategories: (sourceUrl) =>

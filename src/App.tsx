@@ -484,6 +484,7 @@ function Player({
   episodeLabel,
   hasNextEpisode,
   onProgress,
+  onPlaying,
   onEnded,
   onNextEpisode,
   onFailure,
@@ -497,6 +498,7 @@ function Player({
   episodeLabel: string;
   hasNextEpisode: boolean;
   onProgress: (position: number, duration: number) => void;
+  onPlaying: () => void;
   onEnded: () => void;
   onNextEpisode: () => void;
   onFailure: (position: number) => boolean;
@@ -526,6 +528,8 @@ function Player({
   onFailureRef.current = onFailure;
   const onProgressRef = useRef(onProgress);
   onProgressRef.current = onProgress;
+  const onPlayingRef = useRef(onPlaying);
+  onPlayingRef.current = onPlaying;
   const onEndedRef = useRef(onEnded);
   onEndedRef.current = onEnded;
   const [error, setError] = useState("");
@@ -736,6 +740,7 @@ function Player({
         });
         art.on("video:playing", () => {
           sourceRef.current?.clearTimers();
+          onPlayingRef.current();
         });
         // 播放途中若一直转圈且没有触发 error，也继续尝试右侧的其他线路。
         art.on("video:waiting", () => sourceRef.current?.watchStall());
@@ -836,8 +841,8 @@ export default function App() {
   const [exactSearch, setExactSearch] = useState(
     readStorage("exact-search", false),
   );
-  const [history, setHistory] = useState<HistoryItem[]>(
-    readStorage("history", []),
+  const [history, setHistory] = useState<HistoryItem[]>(() =>
+    window.videoAPI.listHistory(),
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsClosing, setSettingsClosing] = useState(false);
@@ -865,6 +870,12 @@ export default function App() {
   const [detail, setDetail] = useState<VodDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
+  const [otherSourcePrompt, setOtherSourcePrompt] = useState<{
+    entry: HistoryItem;
+    line: number;
+    episode: number;
+    label: string;
+  } | null>(null);
   const [line, setLine] = useState(0);
   const [episode, setEpisode] = useState<number | null>(null);
   const [episodeOrder, setEpisodeOrder] = useState<"ascending" | "descending">(
@@ -894,12 +905,19 @@ export default function App() {
   const settingsCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const progressSaved = useRef(0);
   const progressIdentity = useRef("");
+  const otherSourceReference = useRef<{
+    targetKey: string;
+    episodeLabel: string;
+    referencedKey: string;
+    playing: boolean;
+  } | null>(null);
   const castClock = useRef<{
     deviceId: string;
     url: string;
     position: number;
     at: number;
     duration: number;
+    needsResync: boolean;
   } | null>(null);
   const pageScroll = useRef<HTMLDivElement>(null);
   const detailScroll = useRef<HTMLDivElement>(null);
@@ -938,6 +956,8 @@ export default function App() {
   function closeDetail(immediate = false) {
     if (detailClosing) return;
     ++detailSerial.current;
+    setOtherSourcePrompt(null);
+    otherSourceReference.current = null;
     if (castingDevice)
       void saveCastProgress().finally(() => window.videoAPI.castStop().catch(() => {}));
     setCastingDevice(null);
@@ -1014,6 +1034,7 @@ export default function App() {
         playerInstance.current.fullscreenWeb = false;
       else if (sourceFormatOpen) setSourceFormatOpen(false);
       else if (castOpen) setCastOpen(false);
+      else if (otherSourcePrompt) setOtherSourcePrompt(null);
       else if (settingsOpen) closeSettings();
       else if (showRecentSearches) setShowRecentSearches(false);
       else if (customSourceOpen) setCustomSourceOpen(false);
@@ -1044,6 +1065,7 @@ export default function App() {
   }, [
     sourceFormatOpen,
     castOpen,
+    otherSourcePrompt,
     settingsOpen,
     settingsClosing,
     showRecentSearches,
@@ -1291,6 +1313,7 @@ export default function App() {
           return;
         }
         // 电视端结束当前集后，继续把下一集交给同一台设备。
+        otherSourceReference.current = null;
         setEpisode(nextIndex);
         setCastBusy(true);
         setCastError("");
@@ -1308,6 +1331,7 @@ export default function App() {
             position: 0,
             at: Date.now(),
             duration: 0,
+            needsResync: false,
           };
         } catch (castError) {
           setCastError(`自动换集投屏失败：${(castError as Error).message}`);
@@ -1325,24 +1349,53 @@ export default function App() {
     if (!castingDevice || !selected || !currentUrl) return;
     let active = true;
     let polling = false;
-    const poll = async () => {
-      if (polling) return;
+    let request = 0;
+    const poll = async (resume = false) => {
+      // 锁屏前的查询可能仍在等待原生回调；回到前台时发起新查询并忽略旧结果。
+      if (polling && !resume) return;
+      const currentRequest = ++request;
       polling = true;
       try {
         const progress = await window.videoAPI.castProgress().catch(() => null);
-        if (!active) return;
+        if (!active || currentRequest !== request) return;
         const current = updateCastProgress(castingDevice.id, currentUrl, progress);
+        if (progress?.deviceId === castingDevice.id && progress.url === currentUrl && progress.position > 1) {
+          const reference = otherSourceReference.current;
+          if (reference?.targetKey === `${selected.sourceUrl}:${selected.id}` &&
+              reference.episodeLabel === detail?.lines[line]?.episodes[episode ?? 0]?.label)
+            reference.playing = true;
+        }
         if (current) recordProgress(current.position, current.duration);
       } finally {
-        polling = false;
+        if (currentRequest === request) polling = false;
       }
     };
-    // 电视端控制播放期间，本机播放器已卸载，定时用电视的实际进度更新记录。
+    // 电视端控制播放期间，本机播放器已卸载，每 4 秒查询并保存电视的实际进度。
     void poll();
-    const timer = window.setInterval(poll, 5000);
+    const timer = window.setInterval(() => void poll(), 4000);
+    let removeResumeListener: (() => void) | undefined;
+    const onVisible = () => {
+      if (!document.hidden) void poll(true);
+    };
+    if (
+      window.videoAPI.platform === "android" &&
+      document.documentElement.dataset.harmony !== "true"
+    ) {
+      CapacitorApp.addListener("appStateChange", ({ isActive }) => {
+        if (isActive) void poll(true);
+      }).then((listener) => {
+        if (active) removeResumeListener = () => void listener.remove();
+        else void listener.remove();
+      });
+    } else {
+      document.addEventListener("visibilitychange", onVisible);
+    }
     return () => {
       active = false;
+      request++;
       window.clearInterval(timer);
+      removeResumeListener?.();
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [castingDevice, selected, detail, line, episode]);
 
@@ -1509,6 +1562,8 @@ export default function App() {
     const serial = ++detailSerial.current;
     failedLines.current.clear();
     fallbackPosition.current = null;
+    setOtherSourcePrompt(null);
+    otherSourceReference.current = null;
     setEpisodeOrder("ascending");
     const cachedDetail = resumeItem?.detail;
     const canResume = Boolean(
@@ -1527,10 +1582,54 @@ export default function App() {
     setCastingDevice(null);
     setLine(resumeItem?.line || 0);
     setEpisode(resumeItem ? resumeItem.episode : null);
+    const otherHistory = !resumeItem &&
+      !history.some((entry) => entry.key === `${item.sourceUrl}:${item.id}`)
+      ? window.videoAPI.latestOtherSourceHistory(item.title, item.sourceUrl)
+          .catch((error) => {
+            console.error("查询其它源播放记录失败", error);
+            return null;
+          })
+      : Promise.resolve(null);
     try {
       const freshDetail = await window.videoAPI.detail(item.sourceUrl, item.id);
       if (serial !== detailSerial.current) return;
+      const other = await otherHistory;
+      if (serial !== detailSerial.current) return;
       setDetail(freshDetail);
+      if (other) {
+        // 两边所有线路都只有一集时按电影处理，忽略“正片”等不同集名。
+        const singleEpisodeMovie = Boolean(
+          other.detail?.lines.length &&
+          other.detail.lines.every((item) => item.episodes.length === 1) &&
+          freshDetail.lines.length &&
+          freshDetail.lines.every((item) => item.episodes.length === 1),
+        );
+        const savedLabel = other.detail?.lines[other.line]?.episodes[other.episode]?.label?.trim();
+        const savedNumber = savedLabel?.match(/^(?:第\s*)?0*(\d+)\s*(?:集|话)?$/)?.[1];
+        // 跨源线路顺序可能不同；先对齐集名或集号，不沿用旧线路下标。
+        for (let nextLine = 0; nextLine < freshDetail.lines.length; nextLine++) {
+          const episodes = freshDetail.lines[nextLine].episodes;
+          let nextEpisode = singleEpisodeMovie ? 0 : -1;
+          if (nextEpisode < 0 && savedLabel)
+            nextEpisode = episodes.findIndex((episode) => episode.label.trim() === savedLabel);
+          if (nextEpisode < 0 && savedNumber)
+            nextEpisode = episodes.findIndex((episode) =>
+              episode.label.trim().match(/^(?:第\s*)?0*(\d+)\s*(?:集|话)?$/)?.[1] === savedNumber,
+            );
+          // 旧记录没有缓存集名时，只能按保存的集数序号匹配。
+          if (nextEpisode < 0 && !savedLabel && other.episode < episodes.length)
+            nextEpisode = other.episode;
+          if (nextEpisode >= 0) {
+            setOtherSourcePrompt({
+              entry: other,
+              line: nextLine,
+              episode: nextEpisode,
+              label: episodes[nextEpisode].label,
+            });
+            break;
+          }
+        }
+      }
       if (
         resumeItem &&
         !freshDetail.lines[resumeItem.line]?.episodes[resumeItem.episode]
@@ -1540,13 +1639,13 @@ export default function App() {
       }
       if (resumeItem) {
         setHistory((previous) => {
-          const next = previous.map((entry) =>
-            entry.key === resumeItem.key
-              ? { ...entry, detail: freshDetail }
-              : entry,
+          const current = previous.find((entry) => entry.key === resumeItem.key);
+          if (!current) return previous;
+          const refreshed = { ...current, detail: freshDetail };
+          window.videoAPI.upsertHistory(refreshed);
+          return previous.map((entry) =>
+            entry.key === refreshed.key ? refreshed : entry,
           );
-          saveStorage("history", next);
-          return next;
         });
       }
     } catch (error) {
@@ -1622,14 +1721,24 @@ export default function App() {
     const clock = castClock.current;
     if (!clock || clock.deviceId !== deviceId || clock.url !== url) return null;
     const now = Date.now();
-    // 部分电视不报告时间或只报告 0；正常播放时从上次可信位置推算。
-    const estimated = clock.position + Math.max(0, now - clock.at) / 1000;
+    // 锁屏期间网页定时器可能停摆；恢复时只推算一个周期，优先重新对齐电视的实际时间。
+    const elapsed = Math.max(0, now - clock.at);
+    const estimated = clock.position + Math.min(elapsed, 4000) / 1000;
+    const needsResync = clock.needsResync || elapsed > 15_000;
     const matches = reported?.deviceId === deviceId && reported.url === url;
-    const position = matches && reported.position > 1 && reported.position >= clock.position - 15
-      ? reported.position
-      : estimated;
+    const useReported =
+      matches &&
+      reported.position > 1 &&
+      (needsResync || reported.position >= clock.position - 15);
+    const position = useReported ? reported.position : estimated;
     const duration = matches && reported.duration > 0 ? reported.duration : clock.duration;
-    castClock.current = { ...clock, position, duration, at: now };
+    castClock.current = {
+      ...clock,
+      position,
+      duration,
+      at: now,
+      needsResync: needsResync && !useReported,
+    };
     return { position, duration };
   }
 
@@ -1638,12 +1747,22 @@ export default function App() {
     if (!castingDevice || !url) return null;
     const reported = await window.videoAPI.castProgress().catch(() => null);
     const current = updateCastProgress(castingDevice.id, url, reported);
+    if (reported?.deviceId === castingDevice.id && reported.url === url && reported.position > 1) {
+      const reference = otherSourceReference.current;
+      if (reference?.targetKey === `${selected?.sourceUrl}:${selected?.id}` &&
+          reference.episodeLabel === detail?.lines[line]?.episodes[episode ?? 0]?.label)
+        reference.playing = true;
+    }
     if (current) recordProgress(current.position, current.duration, true);
     return current;
   }
 
   function recordProgress(position: number, duration: number, force = false) {
     if (!selected || episode === null || position <= 1) return;
+    const pendingReference = otherSourceReference.current;
+    // 借用进度时，播放器尚未真正开始播放就不生成当前源的新记录。
+    if (pendingReference?.targetKey === `${selected.sourceUrl}:${selected.id}` && !pendingReference.playing)
+      return;
     const identity = `${selected.sourceUrl}:${selected.id}:${line}:${episode}`;
     if (identity !== progressIdentity.current) {
       progressIdentity.current = identity;
@@ -1665,12 +1784,24 @@ export default function App() {
       duration,
       updatedAt: Date.now(),
     };
+    const reference = otherSourceReference.current;
+    const referencedKey = reference?.playing && reference.targetKey === item.key &&
+      reference.episodeLabel === detail?.lines[line]?.episodes[episode]?.label
+      ? reference.referencedKey : null;
+    if (referencedKey) otherSourceReference.current = null;
+    // 先写入当前源的有效进度，再移除借用的那条记录。
+    window.videoAPI.upsertHistory(item);
+    if (referencedKey) window.videoAPI.deleteHistory(referencedKey);
     setHistory((previous) => {
       const next = [
         item,
-        ...previous.filter((entry) => entry.key !== item.key),
+        ...previous.filter((entry) => entry.key !== item.key && entry.key !== referencedKey),
       ].slice(0, 100);
-      saveStorage("history", next);
+      // 历史列表最多保留 100 部，超出时只删除被淘汰的记录。
+      const retained = new Set(next.map((entry) => entry.key));
+      previous
+        .filter((entry) => entry.key !== referencedKey && !retained.has(entry.key))
+        .forEach((entry) => window.videoAPI.deleteHistory(entry.key));
       return next;
     });
   }
@@ -1683,6 +1814,7 @@ export default function App() {
     ) {
       failedLines.current.clear();
       fallbackPosition.current = null;
+      otherSourceReference.current = null;
       setEpisode(episode + 1);
     }
   }
@@ -1744,6 +1876,7 @@ export default function App() {
         : selectedHistory?.line === line && selectedHistory.episode === episodeIndex
           ? selectedHistory.duration
           : 0,
+      needsResync: false,
     };
   }
 
@@ -1778,6 +1911,7 @@ export default function App() {
     if (castingDevice && index === episode) return;
     failedLines.current.clear();
     fallbackPosition.current = null;
+    otherSourceReference.current = null;
     setEpisode(index);
     setPlaybackSerial((current) => current + 1);
     // 选集面板可能在长页面底部，切换后直接露出播放器。
@@ -2663,7 +2797,7 @@ export default function App() {
                       className="subtle-button"
                       onClick={() => {
                         setHistory([]);
-                        saveStorage("history", []);
+                        window.videoAPI.clearHistory();
                       }}
                     >
                       清空记录
@@ -2713,7 +2847,7 @@ export default function App() {
                               (item) => item.key !== entry.key,
                             );
                             setHistory(next);
-                            saveStorage("history", next);
+                            window.videoAPI.deleteHistory(entry.key);
                           }}
                         >
                           <X size={16} />
@@ -2794,6 +2928,7 @@ export default function App() {
                           onClick={() => {
                             failedLines.current.clear();
                             fallbackPosition.current = null;
+                            otherSourceReference.current = null;
                             // 从搜索结果重进详情时，也要按这部影片的记录选中集数和线路。
                             const resumeLine = selectedHistory?.line ?? 0;
                             const resumeEpisode = selectedHistory?.episode ?? 0;
@@ -2849,6 +2984,14 @@ export default function App() {
                                   : 0)
                               }
                               onProgress={recordProgress}
+                              onPlaying={() => {
+                                const reference = otherSourceReference.current;
+                                if (reference?.targetKey === `${selected.sourceUrl}:${selected.id}` &&
+                                    reference.episodeLabel === playing.label) {
+                                  reference.playing = true;
+                                  progressSaved.current = 0;
+                                }
+                              }}
                               onEnded={nextEpisode}
                               onNextEpisode={playNextEpisode}
                               onFailure={(position) => {
@@ -2876,6 +3019,9 @@ export default function App() {
                                   if (nextEpisode < 0 && episodes[episode]?.url)
                                     nextEpisode = episode;
                                   if (nextEpisode < 0) continue;
+                                  const reference = otherSourceReference.current;
+                                  if (reference?.episodeLabel === currentEpisode.label)
+                                    reference.episodeLabel = episodes[nextEpisode].label;
                                   fallbackPosition.current = position;
                                   setLine(nextLine);
                                   setEpisode(nextEpisode);
@@ -2973,6 +3119,7 @@ export default function App() {
                               onClick={() => {
                                 failedLines.current.clear();
                                 fallbackPosition.current = null;
+                                otherSourceReference.current = null;
                                 setLine(index);
                                 setEpisode(null);
                               }}
@@ -3041,6 +3188,51 @@ export default function App() {
                 </div>
               )
             )}
+          </div>
+        </div>
+      )}
+
+      {otherSourcePrompt && (
+        <div
+          className="modal-backdrop other-source-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setOtherSourcePrompt(null);
+          }}
+        >
+          <div className="cast-modal other-source-modal" role="dialog" aria-modal="true" aria-labelledby="other-source-title">
+            <div className="modal-heading">
+              <div>
+                <History size={22} />
+                <h2 id="other-source-title">发现其它源播放记录</h2>
+              </div>
+            </div>
+            <p>
+              「{otherSourcePrompt.entry.item.source || otherSourcePrompt.entry.item.sourceUrl}」曾播放到
+              {otherSourcePrompt.label}（约 {Math.floor(otherSourcePrompt.entry.position / 60)} 分钟）。
+              是否从当前源继续播放？
+            </p>
+            <div className="other-source-actions">
+              <button className="load-more" autoFocus onClick={() => setOtherSourcePrompt(null)}>取消</button>
+              <button className="primary-button" onClick={() => {
+                if (!selected) return;
+                failedLines.current.clear();
+                otherSourceReference.current = {
+                  targetKey: `${selected.sourceUrl}:${selected.id}`,
+                  episodeLabel: otherSourcePrompt.label,
+                  referencedKey: otherSourcePrompt.entry.key,
+                  playing: false,
+                };
+                fallbackPosition.current = otherSourcePrompt.entry.position > 5 &&
+                  (!otherSourcePrompt.entry.duration ||
+                    otherSourcePrompt.entry.position < otherSourcePrompt.entry.duration - 15)
+                  ? otherSourcePrompt.entry.position : 0;
+                setLine(otherSourcePrompt.line);
+                setEpisode(otherSourcePrompt.episode);
+                setPlaybackSerial((current) => current + 1);
+                setOtherSourcePrompt(null);
+                detailScroll.current?.scrollTo(0, 0);
+              }}>同意</button>
+            </div>
           </div>
         </div>
       )}

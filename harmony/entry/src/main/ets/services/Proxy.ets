@@ -6,22 +6,86 @@ import { lanNetwork } from './Lan';
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125 Safari/537.36';
 const encoder = new util.TextEncoder();
 const decoder = new util.TextDecoder('utf-8');
-const AD_PATH_HINT = /(?:^|[/_?&=-])(?:ad|ads|advert|advertise|commercial|preroll)(?:$|[/_?&=.-])/i;
+const AD_URL = /adjump|advert|\/ads?\//i;
 const AD_DATE_RANGE = /\bCLASS\s*=\s*"?(?:ad|advert)/i;
+
+interface SegmentGroup {
+  start: number;
+  end: number;
+  disc: number;
+  urls: string[];
+  seconds: number;
+}
+
+function scanGroups(lines: string[]): SegmentGroup[] {
+  const boundaries: number[] = [-1];
+  lines.forEach((line: string, index: number) => {
+    if (line.trim() === '#EXT-X-DISCONTINUITY') boundaries.push(index);
+  });
+  boundaries.push(lines.length);
+  const groups: SegmentGroup[] = [];
+  for (let groupIndex = 0; groupIndex < boundaries.length - 1; groupIndex++) {
+    const start = boundaries[groupIndex] + 1;
+    const end = boundaries[groupIndex + 1];
+    const urls: string[] = [];
+    let seconds = 0;
+    for (let i = start; i < end; i++) {
+      const line = lines[i].trim();
+      const duration = line.match(/^#EXTINF:([\d.]+)/);
+      if (duration) seconds += Number(duration[1]);
+      else if (line && !line.startsWith('#')) urls.push(line);
+    }
+    groups.push({ start, end, disc: boundaries[groupIndex], urls, seconds });
+  }
+  return groups;
+}
+
+function removeGroups(lines: string[], groups: SegmentGroup[]): string[] {
+  const removed: boolean[] = new Array<boolean>(lines.length).fill(false);
+  for (const group of groups) {
+    if (group.disc >= 0) removed[group.disc] = true;
+    for (let i = group.start; i < group.end; i++) {
+      // 正片可能继续使用广告段声明的密钥或初始化片段。
+      const line = lines[i].trim();
+      if (!line.startsWith('#EXT-X-KEY:') && !line.startsWith('#EXT-X-MAP:') &&
+        line !== '#EXT-X-ENDLIST') removed[i] = true;
+    }
+  }
+  return lines.filter((_line: string, index: number) => !removed[index]);
+}
 
 function filterHlsAdSegments(manifest: string): string {
   // 直播清单会持续变更序号，字节范围清单可能依赖前一片段的偏移，先保持原样。
   if (!manifest.includes('#EXT-X-ENDLIST') || manifest.includes('#EXT-X-BYTERANGE')) return manifest;
 
+  let lines = manifest.replace(/\r/g, '').split('\n');
+  let groups = scanGroups(lines);
+  // 与 LibreTV 一样，地址命中时只有整组分片都命中才删除。
+  lines = removeGroups(lines, groups.filter((group: SegmentGroup) =>
+    group.disc >= 0 && group.urls.length > 0 && group.urls.every((segment: string) => AD_URL.test(segment))));
+
+  groups = scanGroups(lines);
+  // 两个至少 120 秒的长段之间，才把不超过 30 秒的短段判为中插。
+  lines = removeGroups(lines, groups.filter((group: SegmentGroup, index: number) =>
+    index > 0 && group.urls.length > 0 && group.seconds > 0 && group.seconds <= 30 &&
+    groups[index - 1].seconds >= 120 && (groups[index + 1]?.seconds || 0) >= 120));
+
+  groups = scanGroups(lines);
+  const lead = groups[1];
+  if (groups[0]?.urls.length === 0 && lead && lead.urls.length > 0 && groups.length > 2 &&
+    lead.seconds > 0 && lead.seconds <= 90 && lead.urls.length <= 20) {
+    const others = groups.slice(2).map((group: SegmentGroup) => group.urls.length).sort((a: number, b: number) => a - b);
+    const median = others[Math.floor(others.length / 2)];
+    if (groups.length < 5 || Math.abs(lead.urls.length - median) > Math.max(3, median * 0.5))
+      lines = removeGroups(lines, [lead]);
+  }
+
+  // 显式标记最后处理，避免删掉片头广告后把短正片误判为新的片头。
   const output: string[] = [];
   let dateRangeAd = false;
   let cueAd = false;
   let segmentStart = -1;
-  let skipSegment = false;
-  let keptSegments = 0;
-  let removedSegments = 0;
-
-  for (const line of manifest.replace(/\r/g, '').split('\n')) {
+  for (const line of lines) {
     if (line.startsWith('#EXT-X-DATERANGE') && AD_DATE_RANGE.test(line)) {
       dateRangeAd = true;
       continue;
@@ -35,29 +99,19 @@ function filterHlsAdSegments(manifest: string): string {
       continue;
     }
     if (line === '#EXT-X-DISCONTINUITY') dateRangeAd = false;
-    if (line.startsWith('#EXTINF')) {
-      segmentStart = output.length;
-      skipSegment = dateRangeAd || cueAd;
-    }
-
+    if (line.startsWith('#EXTINF')) segmentStart = output.length;
     if (line && !line.startsWith('#') && segmentStart >= 0) {
-      // 只检查片段路径，避免签名参数中出现 ad 字段时误删正片。
-      if (skipSegment || AD_PATH_HINT.test(line.split(/[?#]/)[0])) {
-        output.splice(segmentStart);
-        removedSegments++;
-      } else {
-        output.push(line);
-        keptSegments++;
-      }
+      if (dateRangeAd || cueAd) output.splice(segmentStart);
+      else output.push(line);
       segmentStart = -1;
-      skipSegment = false;
-    } else {
-      output.push(line);
-    }
+    } else output.push(line);
   }
-
-  // 全部片段都被判为广告时，回退原清单，优先保证播放。
-  return removedSegments > 0 && keptSegments > 0 ? output.join('\n') : manifest;
+  lines = output;
+  const firstSegment = lines.findIndex((line: string) => !!line.trim() && !line.trim().startsWith('#'));
+  // 所有分片都被判为广告时回退原文，避免返回空清单。
+  if (firstSegment < 0) return manifest;
+  return lines.filter((line: string, index: number) =>
+    index >= firstSegment || line.trim() !== '#EXT-X-DISCONTINUITY').join('\n');
 }
 
 export class Proxy {

@@ -116,6 +116,14 @@ private val white = Color(0xFFF7F7F9)
 private val movieTags = listOf("热门", "最新", "经典", "可播放", "豆瓣高分", "冷门佳片", "华语", "欧美", "韩国", "日本", "动作", "喜剧", "爱情", "科幻", "悬疑", "恐怖", "成长", "动画")
 private val tvTags = listOf("热门", "最新", "国产剧", "港剧", "美剧", "英剧", "日剧", "韩剧", "日本动画", "综艺", "纪录片")
 
+private data class OtherSourcePrompt(
+    val entry: TvHistoryEntry,
+    val targetKey: String,
+    val lineIndex: Int,
+    val episodeIndex: Int,
+    val episodeLabel: String,
+)
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -137,6 +145,9 @@ private fun TvApp(onExit: () -> Unit) {
     var sources by remember { mutableStateOf(settings.sources) }
     var history by remember { mutableStateOf(settings.history) }
     var confirmClearHistory by remember { mutableStateOf(false) }
+    var otherSourcePrompt by remember { mutableStateOf<OtherSourcePrompt?>(null) }
+    var otherSourceReference by remember { mutableStateOf<OtherSourcePrompt?>(null) }
+    var referencedPlaybackStarted by remember { mutableStateOf(false) }
     var selectedSourceUrl by remember { mutableStateOf(settings.selectedSourceUrl) }
     var subscriptionInput by remember { mutableStateOf(settings.subscriptionUrl) }
     // 自定义页可浏览已启用的成人源；搜索仍在 VodRepository 中排除成人源。
@@ -209,6 +220,7 @@ private fun TvApp(onExit: () -> Unit) {
     val settingsImportFocus = remember { FocusRequester() }
     val detailPlayFocus = remember { FocusRequester() }
     val cancelClearHistoryFocus = remember { FocusRequester() }
+    val confirmOtherSourceFocus = remember { FocusRequester() }
     val menuFocus = remember { listOf("movie", "tv", "variety", "custom", "history").associateWith { FocusRequester() } }
     var lastFocusedMenu by remember { mutableStateOf("movie") }
     var navigationToken by remember { mutableIntStateOf(0) }
@@ -308,10 +320,19 @@ private fun TvApp(onExit: () -> Unit) {
             item, line.name, lineIndex, episode.label, playingIndex,
             positionMs.coerceAtLeast(0L), durationMs.coerceAtLeast(0L), System.currentTimeMillis(),
         )
-        val updated = listOf(entry) + history.filterNot { it.key == entry.key }
-        updated.drop(60).forEach { settings.removeDetail(it.item) }
+        val referenced = otherSourceReference?.takeIf {
+            referencedPlaybackStarted && it.targetKey == entry.key && it.episodeLabel == episode.label
+        }
+        val updated = listOf(entry) + history.filterNot { it.key == entry.key || it.key == referenced?.entry?.key }
+        settings.upsertHistory(entry)
+        if (referenced != null) {
+            // 当前源已开始播放且进度保存成功，才删除借用的原记录。
+            settings.deleteHistory(referenced.entry.key)
+            otherSourceReference = null
+            referencedPlaybackStarted = false
+        }
+        updated.drop(60).forEach { settings.deleteHistory(it.key) }
         history = updated.take(60)
-        settings.history = history
     }
 
     // 实时线路到达时，用名称和集名对齐旧进度，避免源调整顺序后跳错集。
@@ -326,6 +347,8 @@ private fun TvApp(onExit: () -> Unit) {
 
     fun returnToDetail() {
         if (playbackStarted) saveHistory(currentPositionMs, currentDurationMs)
+        otherSourceReference = null
+        referencedPlaybackStarted = false
         playVersion++
         streamUrl = ""
         refreshedDetail?.let { latest ->
@@ -376,6 +399,8 @@ private fun TvApp(onExit: () -> Unit) {
         val oldEpisode = oldLine?.episodes?.getOrNull(playingIndex)
         val matched = matchingEpisode(latest, oldLine?.name.orEmpty(), lineIndex, oldEpisode?.label.orEmpty(), playingIndex)
             ?: return false
+        if (otherSourceReference?.episodeLabel == oldEpisode?.label)
+            otherSourceReference = otherSourceReference?.copy(episodeLabel = latest.lines[matched.first].episodes[matched.second].label)
         detail = latest
         refreshedDetail = null
         play(matched.second, matched.first, startPositionMs = positionMs.coerceAtLeast(0L), status = "正在尝试更新后的线路...")
@@ -396,6 +421,8 @@ private fun TvApp(onExit: () -> Unit) {
         }
         if (alternative != null) {
             val (nextLine, nextEpisode) = alternative
+            if (otherSourceReference?.episodeLabel == label)
+                otherSourceReference = otherSourceReference?.copy(episodeLabel = lines[nextLine].episodes[nextEpisode].label)
             play(
                 nextEpisode, nextLine, attemptedLines + nextLine, positionMs.coerceAtLeast(0L),
                 "线路不可用，正在切换到 ${lines[nextLine].name}...",
@@ -410,6 +437,11 @@ private fun TvApp(onExit: () -> Unit) {
         returnScreen = screen
         screen = "detail"
         selectedVideo = item
+        otherSourcePrompt = null
+        otherSourceReference = null
+        referencedPlaybackStarted = false
+        val otherHistory = if (resume == null && history.none { it.key == "${item.sourceUrl}:${item.id}" })
+            settings.latestOtherSourceHistory(item.title, item.sourceUrl) else null
         val cached = resume?.let { settings.cachedDetail(item) }
         val cachedEpisode = if (cached != null) {
             matchingEpisode(cached, resume.lineName, resume.lineIndex, resume.episodeLabel, resume.episodeIndex)
@@ -435,6 +467,30 @@ private fun TvApp(onExit: () -> Unit) {
                         if (streamError.isNotEmpty()) tryRefreshedLines(currentPositionMs.coerceAtLeast(resumePositionMs))
                     } else {
                         detail = loaded
+                        if (otherHistory != null && screen == "detail") {
+                            val savedLines = settings.cachedDetail(otherHistory.item)?.lines.orEmpty()
+                            // 两边所有线路都只有一集时按电影处理，集名常是“正片”或画质名。
+                            val singleEpisodeMovie = savedLines.isNotEmpty() && savedLines.all { it.episodes.size == 1 } &&
+                                loaded.lines.isNotEmpty() && loaded.lines.all { it.episodes.size == 1 }
+                            val savedLabel = otherHistory.episodeLabel.trim()
+                            val episodePattern = Regex("^(?:第\\s*)?0*(\\d+)\\s*(?:集|话)?$")
+                            val savedNumber = episodePattern.matchEntire(savedLabel)?.groupValues?.get(1)
+                            // 其它源的线路顺序不可靠，按集名或集号找当前源的对应集。
+                            val match = if (singleEpisodeMovie) 0 to 0 else loaded.lines.withIndex().firstNotNullOfOrNull { (candidateLine, line) ->
+                                val exact = line.episodes.indexOfFirst { it.label.trim() == savedLabel }
+                                val byNumber = if (savedNumber != null) line.episodes.indexOfFirst {
+                                    episodePattern.matchEntire(it.label.trim())?.groupValues?.get(1) == savedNumber
+                                } else -1
+                                val byIndex = if (savedLabel.isEmpty() && otherHistory.episodeIndex in line.episodes.indices)
+                                    otherHistory.episodeIndex else -1
+                                val candidateEpisode = listOf(exact, byNumber, byIndex).firstOrNull { it >= 0 }
+                                candidateEpisode?.let { candidateLine to it }
+                            }
+                            if (match != null) otherSourcePrompt = OtherSourcePrompt(
+                                otherHistory, "${item.sourceUrl}:${item.id}", match.first, match.second,
+                                loaded.lines[match.first].episodes[match.second].label,
+                            )
+                        }
                         if (resume != null) {
                             val savedEpisode = matchingEpisode(loaded, resume.lineName, resume.lineIndex, resume.episodeLabel, resume.episodeIndex)
                             if (cachedEpisode == null) {
@@ -472,6 +528,10 @@ private fun TvApp(onExit: () -> Unit) {
     }
     BackHandler {
         val now = SystemClock.elapsedRealtime()
+        if (otherSourcePrompt != null) {
+            otherSourcePrompt = null
+            return@BackHandler
+        }
         if (screen != "browse" || listIsScrolled) {
             exitPromptUntil = 0L
             exitBlockedUntil = now + 800L
@@ -582,14 +642,29 @@ private fun TvApp(onExit: () -> Unit) {
                             playbackSpeed = playbackSpeed,
                             onSpeedChange = { playbackSpeed = it },
                             onBack = { returnToDetail() },
-                            onSelectEpisode = { selectedLine, selectedEpisode -> play(selectedEpisode, selectedLine) },
-                            onNextEpisode = { play(playingIndex + 1, lineIndex) },
+                            onSelectEpisode = { selectedLine, selectedEpisode ->
+                                otherSourceReference = null
+                                referencedPlaybackStarted = false
+                                play(selectedEpisode, selectedLine)
+                            },
+                            onNextEpisode = {
+                                otherSourceReference = null
+                                referencedPlaybackStarted = false
+                                play(playingIndex + 1, lineIndex)
+                            },
+                            onPlaybackStarted = {
+                                val reference = otherSourceReference
+                                val label = detail?.lines?.getOrNull(lineIndex)?.episodes?.getOrNull(playingIndex)?.label
+                                if (currentPlayVersion == playVersion && reference != null &&
+                                    reference.targetKey == selectedVideo?.let { "${it.sourceUrl}:${it.id}" } &&
+                                    reference.episodeLabel == label) referencedPlaybackStarted = true
+                                if (currentPlayVersion == playVersion) playbackStarted = true
+                            },
                             onProgress = { position, duration ->
                                 if (currentPlayVersion == playVersion && screen == "player") {
-                                    playbackStarted = true
                                     currentPositionMs = position
                                     currentDurationMs = duration
-                                    saveHistory(position, duration)
+                                    if (playbackStarted) saveHistory(position, duration)
                                 }
                             },
                             onPlaybackFailure = { reason, position ->
@@ -945,8 +1020,7 @@ private fun TvApp(onExit: () -> Unit) {
                                 }
                                 FocusButton("删除", tab = true, modifier = Modifier.focusRequester(deleteFocus).focusProperties { left = rowFocus }, onClick = {
                                     history = history.filterNot { it.key == entry.key }
-                                    settings.history = history
-                                    settings.removeDetail(entry.item)
+                                    settings.deleteHistory(entry.key)
                                 })
                             }
                         }
@@ -1075,6 +1149,32 @@ private fun TvApp(onExit: () -> Unit) {
                     .padding(horizontal = 24.dp, vertical = 14.dp),
             ) {
                 Label("再按一次返回键退出", 18, white, bold = true)
+            }
+        }
+        val prompt = otherSourcePrompt
+        if (prompt != null) {
+            val label = detail?.lines?.getOrNull(prompt.lineIndex)?.episodes?.getOrNull(prompt.episodeIndex)?.label.orEmpty()
+            Dialog(onDismissRequest = { otherSourcePrompt = null }) {
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(panel).padding(28.dp),
+                    verticalArrangement = Arrangement.spacedBy(20.dp),
+                ) {
+                    Label("发现其它源播放记录", 24, white, bold = true)
+                    Label("${prompt.entry.item.sourceName.ifBlank { prompt.entry.item.sourceUrl }} 曾播放到 $label（约 ${prompt.entry.positionMs / 60_000} 分钟）。是否从当前源继续播放？", 17, muted)
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        FocusButton("取消", tab = true, onClick = { otherSourcePrompt = null })
+                        FocusButton("同意", tab = true, modifier = Modifier.focusRequester(confirmOtherSourceFocus), onClick = {
+                            val position = prompt.entry.positionMs.takeIf {
+                                it > 5_000 && (prompt.entry.durationMs <= 0 || it < prompt.entry.durationMs - 15_000)
+                            } ?: 0L
+                            otherSourcePrompt = null
+                            otherSourceReference = prompt
+                            referencedPlaybackStarted = false
+                            play(prompt.episodeIndex, prompt.lineIndex, startPositionMs = position)
+                        })
+                    }
+                }
+                LaunchedEffect(prompt) { confirmOtherSourceFocus.requestFocus() }
             }
         }
         if (confirmClearHistory) {

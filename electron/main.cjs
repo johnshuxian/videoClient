@@ -328,6 +328,36 @@ ipcMain.on("settings:save", (event, key, value) => {
     event.returnValue = error.message;
   }
 });
+ipcMain.on("history:read", (event) => {
+  event.returnValue = settingsStore.listHistory();
+});
+ipcMain.handle("history:latest-other-source", (_event, title, sourceUrl) =>
+  settingsStore.latestOtherSourceHistory(title, sourceUrl),
+);
+ipcMain.on("history:upsert", (event, item) => {
+  try {
+    settingsStore.upsertHistory(item);
+    event.returnValue = null;
+  } catch (error) {
+    event.returnValue = error.message;
+  }
+});
+ipcMain.on("history:delete", (event, key) => {
+  try {
+    settingsStore.deleteHistory(key);
+    event.returnValue = null;
+  } catch (error) {
+    event.returnValue = error.message;
+  }
+});
+ipcMain.on("history:clear", (event) => {
+  try {
+    settingsStore.clearHistory();
+    event.returnValue = null;
+  } catch (error) {
+    event.returnValue = error.message;
+  }
+});
 
 ipcMain.handle("catalog", async (_, type, tag, page, sort) => {
   if (!["movie", "tv", "anime", "variety"].includes(type))

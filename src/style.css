@@ -2070,6 +2070,18 @@ html[data-harmony="true"] .art-video-player.art-fullscreen-web .art-bottom {
 .cast-modal .load-more {
   margin-top: 15px;
 }
+.other-source-backdrop {
+  z-index: 40;
+}
+.other-source-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+.other-source-actions .load-more,
+.other-source-actions .primary-button {
+  margin: 0;
+}
 /* 浅色模式保留原有层级和强调色，只调整表面、文字与边框。 */
 :root[data-theme="light"] {
   color: #172b3c;
@@ -2949,6 +2961,22 @@ body.player-web-fullscreen .app-shell {
     max-width: calc(100vw - 20px);
     max-height: calc(100dvh - 32px);
     padding: 18px;
+  }
+  /* 两个确认按钮在窄屏上各占一列，避免 flex 把文字和按钮压窄。 */
+  .platform-android .other-source-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .platform-android .other-source-actions button {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    margin: 0;
+    justify-content: center;
+    white-space: nowrap;
+  }
+  .platform-android .other-source-modal > p {
+    overflow-wrap: anywhere;
   }
 }
 /* 触屏点击会保留 :hover，避免关闭设置页后按钮持续出现灰色底。 */
