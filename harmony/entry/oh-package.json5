@@ -1,6 +1,7 @@
 {
   "name": "entry",
-  "version": "0.2.25",
+  // ohpm 模块版本独立于 AppScope 中的应用发布版本。
+  "version": "1.0.0",
   "description": "影窗鸿蒙入口",
   "main": "",
   "dependencies": {}

@@ -2,8 +2,8 @@
   "app": {
     "bundleName": "johnshuxian.video.client",
     "vendor": "shuxian",
-    "versionCode": 2034,
-    "versionName": "0.2.34",
+    "versionCode": 2035,
+    "versionName": "0.2.35",
     "icon": "$media:app_icon",
     "label": "$string:app_name"
   }

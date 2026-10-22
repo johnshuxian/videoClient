@@ -10,6 +10,8 @@ export default defineConfig(({ mode }) => {
     // 部分电视的系统 WebView 更新较慢，避免产物包含较新的 JavaScript 语法。
     build: {
       target: "es2018",
+      // 鸿蒙 ArkWeb 使用内联单脚本；为它保留更合适的体积增长提醒阈值。
+      chunkSizeWarningLimit: harmony ? 1200 : 500,
       ...(harmony
         ? { rollupOptions: { output: { inlineDynamicImports: true } } }
         : {}),

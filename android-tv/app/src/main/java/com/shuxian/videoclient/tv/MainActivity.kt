@@ -1353,29 +1353,40 @@ private fun Poster(
         targetValue = if (showLoading && bitmap == null) 0f else 1f,
         animationSpec = tween(300),
     )
-    Box(modifier.clip(RoundedCornerShape(10.dp)).background(panel), contentAlignment = Alignment.Center) {
-        if (bitmap != null) {
-            Image(bitmap.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().scale(imageScale).alpha(imageAlpha))
+    val image = remember(bitmap) { bitmap?.asImageBitmap() }
+    // TV 海报采用桌面端深色模式的占位底色。
+    Box(
+        modifier.clip(RoundedCornerShape(10.dp)).background(if (showLoading) Color(0xFF1B1D26) else panel),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (image != null) {
+            // 沿用原先的图片缩放与淡入效果，ImageBitmap 随海报数据缓存。
+            Image(image, contentDescription = null, contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().scale(imageScale).alpha(imageAlpha))
         } else if (showLoading && !complete && address.isNotBlank()) {
             val shimmer = rememberInfiniteTransition(label = "poster loading")
-            val progress by shimmer.animateFloat(
+            val progress = shimmer.animateFloat(
                 initialValue = 0f,
                 targetValue = 1f,
-                animationSpec = infiniteRepeatable(tween(1700, easing = LinearEasing)),
+                animationSpec = infiniteRepeatable(tween(1700, easing = CubicBezierEasing(.42f, 0f, .58f, 1f))),
                 label = "poster shimmer",
             )
             Canvas(Modifier.fillMaxSize()) {
-                val bandWidth = size.width * .55f
-                val startX = -bandWidth + (size.width + bandWidth) * progress
+                // 与桌面端深色模式一样，让白色斜向光带在 1.7 秒内扫过占位底色。
+                val startX = (-1.2f + 2.4f * progress.value) * size.width
                 drawRect(
                     brush = Brush.linearGradient(
-                        listOf(Color.Transparent, Color.White.copy(alpha = .18f), Color.Transparent),
+                        colorStops = arrayOf(
+                            .1f to Color.Transparent,
+                            .45f to Color(0x2EFFFFFF),
+                            .8f to Color.Transparent,
+                        ),
                         start = Offset(startX, 0f),
-                        end = Offset(startX + bandWidth, 0f),
+                        end = Offset(startX + size.width, size.height * .18f),
                     ),
                 )
             }
-        } else {
+        } else if (!showLoading) {
             Label("影窗", 22, muted)
         }
     }
@@ -1385,8 +1396,8 @@ private fun Poster(
 private fun PosterCard(title: String, poster: String, subtitle: String, repository: VodRepository, modifier: Modifier = Modifier, onFocus: () -> Unit = {}, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(10.dp)
-    // 遥控器焦点对应网页悬停：卡片上浮、整体放大，海报在裁切框内缓慢放大。
-    val focusProgress by animateFloatAsState(
+    // 焦点区域放在缩放层外，避免列表按放大后的边界反复调整滚动位置。
+    val focusProgress = animateFloatAsState(
         targetValue = if (focused) 1f else 0f,
         animationSpec = tween(300, easing = CubicBezierEasing(.165f, .84f, .44f, 1f)),
     )
@@ -1399,14 +1410,13 @@ private fun PosterCard(title: String, poster: String, subtitle: String, reposito
             val newlyFocused = it.isFocused && !focused
             focused = it.isFocused
             if (newlyFocused) onFocus()
-        }.graphicsLayer {
-            translationY = -8.dp.toPx() * focusProgress
-            scaleX = 1f + .06f * focusProgress
-            scaleY = 1f + .06f * focusProgress
+        }.clickable(onClick = onClick).graphicsLayer {
+            scaleX = 1f + .06f * focusProgress.value
+            scaleY = 1f + .06f * focusProgress.value
         }
             .background(if (focused) Color(0xFF3B302B) else panel, shape)
             .border(3.dp, if (focused) white else Color.Transparent, shape)
-            .clickable(onClick = onClick).padding(7.dp),
+            .padding(7.dp),
     ) {
         Poster(poster, repository, Modifier.fillMaxWidth().aspectRatio(.72f), showLoading = true, imageScale = imageScale)
         Spacer(Modifier.height(10.dp))

@@ -45,7 +45,7 @@ data class VideoDetail(
 data class VodPage(val items: List<VideoItem>, val hasMore: Boolean)
 
 class VodRepository {
-    private val posterCache = object : LruCache<String, Bitmap>(16 * 1024 * 1024) {
+    private val posterCache = object : LruCache<String, Bitmap>(32 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount
     }
     private val posterSemaphore = Semaphore(4)
@@ -257,8 +257,16 @@ class VodRepository {
                 try {
                     val request = connection(address)
                     try {
-                        // 保留原图像素；只限制同时解码的海报数量，避免翻页时争用 CPU 和内存。
-                        val bitmap = request.inputStream.use { BitmapFactory.decodeStream(it) }
+                        // 网格海报只显示约 170dp，按显示尺寸解码可减少下移时的内存分配和纹理上传。
+                        val bytes = request.inputStream.use { it.readBytes() }
+                        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                        var sampleSize = 1
+                        while (bounds.outWidth / (sampleSize * 2) >= 400 && bounds.outHeight / (sampleSize * 2) >= 600) {
+                            sampleSize *= 2
+                        }
+                        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size,
+                            BitmapFactory.Options().apply { inSampleSize = sampleSize })
                         if (bitmap != null) synchronized(posterCache) { posterCache.put(address, bitmap) }
                         bitmap
                     } finally { request.disconnect() }

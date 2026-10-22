@@ -12,14 +12,14 @@ foreach ($item in @($node, $hvigor, $sdk)) {
 }
 
 $preload = Join-Path $PSScriptRoot 'harmony\force-sdk-resource.cjs'
-$loader = Join-Path $PSScriptRoot 'harmony\force-deveco-commonjs.mjs'
-$loaderUri = [Uri]::new((Resolve-Path -LiteralPath $loader).Path).AbsoluteUri
+$register = Join-Path $PSScriptRoot 'harmony\register-deveco-loader.mjs'
+$registerUri = [Uri]::new((Resolve-Path -LiteralPath $register).Path).AbsoluteUri
 $preloadPath = $preload.Replace('\', '/')
 $previousNodeOptions = $env:NODE_OPTIONS
 $previousSdkHome = $env:DEVECO_SDK_HOME
 try {
   # 当前 DevEco 安装盘的上级 package.json 将 .js 误判为 ESM；仅在本次构建进程修正加载方式。
-  $env:NODE_OPTIONS = "--require=`"$preloadPath`" --experimental-loader=$loaderUri"
+  $env:NODE_OPTIONS = "--require=`"$preloadPath`" --import=$registerUri"
   $env:DEVECO_SDK_HOME = $sdk
   Push-Location (Join-Path $project 'harmony')
   try {
