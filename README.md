@@ -2,6 +2,14 @@
 
 Windows / macOS 桌面、Android 手机和平板，以及独立原生 Android 电视点播客户端。电影、电视剧和综艺推荐来自豆瓣，番剧榜单来自 Bangumi。初次安装不内置点播源，需要在「播放设置」中粘贴 VOD 订阅地址并导入，例如[这份 vod.json 源清单](https://raw.githubusercontent.com/johnshuxian/IPTVM3U/refs/heads/master/vod.json)。
 
+可用下面的命令把 TVBox 多线路订阅中的直连 JSON 点播接口检测后转换成影窗的 `sources` 格式。第二个参数是输出文件，第三个参数可选，用作搜索测试关键词；命令还会生成同名的 `.report.json` 检测明细。
+
+```bash
+npm run probe:tvbox -- "https://gh-proxy.com/https://raw.githubusercontent.com/noimank/tvbox/main/tvboxmuti.json" "vod-tvbox-sources.json" "长安"
+```
+
+输出只包含搜索、详情和直连播放地址检查通过的 JSON 接口。TVBox 的 JAR / JS 规则站点及 XML 源不会被转换；检测不等于实际播放成功。若要在影窗中通过订阅地址导入，需将生成的 JSON 文件放到可访问的 HTTP(S) 地址。
+
 ## 功能
 
 - 电影、剧集、番剧和综艺推荐、分类筛选、跨源搜索、线路和选集切换

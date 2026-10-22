@@ -14,6 +14,7 @@
     "dist:android": "npm run build:web && cap sync android && cd android && gradlew.bat assembleDebug",
     "dist:android-tv": "cd android-tv && gradlew.bat assembleRelease",
     "sync:harmony": "npm run build:web:harmony && node scripts/sync-harmony.mjs",
+    "probe:tvbox": "node scripts/probe-tvbox-sources.mjs",
     "test": "node --test electron/*.test.cjs",
     "format": "prettier --write src electron vite.config.ts"
   },

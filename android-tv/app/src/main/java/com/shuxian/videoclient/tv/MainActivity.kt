@@ -1161,7 +1161,7 @@ private fun TvApp(onExit: () -> Unit) {
                 ) {
                     Label("发现其它源播放记录", 24, white, bold = true)
                     Label("${prompt.entry.item.sourceName.ifBlank { prompt.entry.item.sourceUrl }} 曾播放到 $label（约 ${prompt.entry.positionMs / 60_000} 分钟）。是否从当前源继续播放？", 17, muted)
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End)) {
                         FocusButton("取消", tab = true, onClick = { otherSourcePrompt = null })
                         FocusButton("同意", tab = true, modifier = Modifier.focusRequester(confirmOtherSourceFocus), onClick = {
                             val position = prompt.entry.positionMs.takeIf {
