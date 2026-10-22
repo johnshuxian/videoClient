@@ -172,12 +172,10 @@ struct Index {
                   }
                   this.fullscreen = enter;
                 }
-                const color = this.fullscreen ? '#000000' : this.light ? '#EDF3F7' : '#0B101A';
+                const color = this.fullscreen ? '#000000' : this.light ? '#F4F6FC' : '#0A0B10';
                 let statusColor = color;
                 if (!this.fullscreen && this.surface === 'settings')
-                  statusColor = this.light ? '#FEFEFE' : '#111D2B';
-                else if (!this.fullscreen && this.light && this.surface === 'page')
-                  statusColor = '#FAFCFD';
+                  statusColor = this.light ? '#FEFEFE' : '#111218';
                 const contentColor = this.light && !this.fullscreen ? '#172B3C' : '#EAF2FA';
                 // 手势导航区采用窗口底色；状态栏文字显式指定颜色，避免浅色主题下图标发灰。
                 await appWindow.setWindowSystemBarProperties({ statusBarColor: statusColor,

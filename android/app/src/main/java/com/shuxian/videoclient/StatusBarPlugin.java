@@ -143,7 +143,7 @@ public class StatusBarPlugin extends Plugin {
     static void applyColor(Activity activity, boolean light, boolean fullscreen) {
         Window window = activity.getWindow();
         // 播放全屏隐藏系统栏；退出后恢复系统栏及用户选择的主题。
-        int color = fullscreen ? Color.BLACK : light ? Color.rgb(237, 243, 247) : Color.rgb(11, 16, 26);
+        int color = fullscreen ? Color.BLACK : light ? Color.rgb(244, 246, 252) : Color.rgb(10, 11, 16);
         // Android 15 的状态栏透明，底色来自应用窗口。
         window.getDecorView().setBackgroundColor(color);
         if (Build.VERSION.SDK_INT < 35) window.setStatusBarColor(color);

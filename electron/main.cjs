@@ -176,7 +176,7 @@ const proxyServer = http.createServer(async (req, res) => {
         "Cache-Control": "no-store",
       });
       res.end(
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 360"><rect width="240" height="360" fill="#203648"/><path d="M80 145h80v70H80zM92 128h56" fill="none" stroke="#6c899c" stroke-width="8" stroke-linecap="round"/><path d="m111 163 28 18-28 18z" fill="#6c899c"/></svg>',
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 360"><path d="M80 145h80v70H80zM92 128h56" fill="none" stroke="#a3a4ad" stroke-width="8" stroke-linecap="round"/><path d="m111 163 28 18-28 18z" fill="#a3a4ad"/></svg>',
       );
     }
     return;
@@ -252,7 +252,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 620,
     title: "影窗",
-    backgroundColor: "#f5f8fc",
+    backgroundColor: "#f4f6fc",
     // Windows 使用页面内的窗口按钮，让标题栏与其余工具按钮保持一致。
     frame: process.platform !== "win32",
     ...(process.platform === "darwin" ? { titleBarStyle: "hidden" } : {}),
@@ -943,5 +943,5 @@ ipcMain.on("window:maximize", () => {
 ipcMain.on("window:close", () => mainWindow.close());
 ipcMain.on("theme:set", (_, theme) => {
   const light = theme === "light";
-  mainWindow.setBackgroundColor(light ? "#f5f8fc" : "#0b101a");
+  mainWindow.setBackgroundColor(light ? "#f4f6fc" : "#0a0b10");
 });

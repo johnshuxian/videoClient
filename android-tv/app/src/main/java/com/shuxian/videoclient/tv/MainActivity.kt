@@ -13,8 +13,10 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -64,12 +66,14 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.SolidColor
@@ -78,6 +82,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -1330,11 +1335,49 @@ private fun SearchInput(value: String, onChange: (String) -> Unit, hint: String,
 }
 
 @Composable
-private fun Poster(address: String, repository: VodRepository, modifier: Modifier = Modifier) {
-    val bitmap by produceState<android.graphics.Bitmap?>(null, address) { value = repository.poster(address) }
+private fun Poster(
+    address: String,
+    repository: VodRepository,
+    modifier: Modifier = Modifier,
+    showLoading: Boolean = false,
+    imageScale: Float = 1f,
+) {
+    // 地址变化时重置加载状态，避免列表复用卡片时短暂显示上一张海报。
+    val posterState by key(address) {
+        produceState<Pair<android.graphics.Bitmap?, Boolean>>(null to false) {
+            value = repository.poster(address) to true
+        }
+    }
+    val (bitmap, complete) = posterState
+    val imageAlpha by animateFloatAsState(
+        targetValue = if (showLoading && bitmap == null) 0f else 1f,
+        animationSpec = tween(300),
+    )
     Box(modifier.clip(RoundedCornerShape(10.dp)).background(panel), contentAlignment = Alignment.Center) {
-        if (bitmap != null) Image(bitmap!!.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-        else Label("影窗", 22, muted)
+        if (bitmap != null) {
+            Image(bitmap.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().scale(imageScale).alpha(imageAlpha))
+        } else if (showLoading && !complete && address.isNotBlank()) {
+            val shimmer = rememberInfiniteTransition(label = "poster loading")
+            val progress by shimmer.animateFloat(
+                initialValue = 0f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(tween(1700, easing = LinearEasing)),
+                label = "poster shimmer",
+            )
+            Canvas(Modifier.fillMaxSize()) {
+                val bandWidth = size.width * .55f
+                val startX = -bandWidth + (size.width + bandWidth) * progress
+                drawRect(
+                    brush = Brush.linearGradient(
+                        listOf(Color.Transparent, Color.White.copy(alpha = .18f), Color.Transparent),
+                        start = Offset(startX, 0f),
+                        end = Offset(startX + bandWidth, 0f),
+                    ),
+                )
+            }
+        } else {
+            Label("影窗", 22, muted)
+        }
     }
 }
 
@@ -1342,17 +1385,30 @@ private fun Poster(address: String, repository: VodRepository, modifier: Modifie
 private fun PosterCard(title: String, poster: String, subtitle: String, repository: VodRepository, modifier: Modifier = Modifier, onFocus: () -> Unit = {}, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(10.dp)
+    // 遥控器焦点对应网页悬停：卡片上浮、整体放大，海报在裁切框内缓慢放大。
+    val focusProgress by animateFloatAsState(
+        targetValue = if (focused) 1f else 0f,
+        animationSpec = tween(300, easing = CubicBezierEasing(.165f, .84f, .44f, 1f)),
+    )
+    val imageScale by animateFloatAsState(
+        targetValue = if (focused) 1.1f else 1f,
+        animationSpec = tween(800, easing = CubicBezierEasing(.165f, .84f, .44f, 1f)),
+    )
     Column(
         modifier.fillMaxWidth().onFocusChanged {
             val newlyFocused = it.isFocused && !focused
             focused = it.isFocused
             if (newlyFocused) onFocus()
-        }.scale(if (focused) 1.06f else 1f)
+        }.graphicsLayer {
+            translationY = -8.dp.toPx() * focusProgress
+            scaleX = 1f + .06f * focusProgress
+            scaleY = 1f + .06f * focusProgress
+        }
             .background(if (focused) Color(0xFF3B302B) else panel, shape)
             .border(3.dp, if (focused) white else Color.Transparent, shape)
             .clickable(onClick = onClick).padding(7.dp),
     ) {
-        Poster(poster, repository, Modifier.fillMaxWidth().aspectRatio(.72f))
+        Poster(poster, repository, Modifier.fillMaxWidth().aspectRatio(.72f), showLoading = true, imageScale = imageScale)
         Spacer(Modifier.height(10.dp))
         BasicText(title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = TextStyle(color = if (focused) accent else white, fontSize = 17.sp, fontWeight = FontWeight.SemiBold))
         BasicText(subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis, style = TextStyle(color = muted, fontSize = 13.sp), modifier = Modifier.padding(top = 3.dp))

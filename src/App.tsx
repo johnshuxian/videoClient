@@ -128,13 +128,16 @@ function PosterImage({
   src,
   alt = "",
   loading = "lazy",
+  showLoading = false,
 }: {
   src: string;
   alt?: string;
   loading?: "lazy" | "eager";
+  showLoading?: boolean;
 }) {
   const url = useProxyImage(src);
   const [failure, setFailure] = useState({ url: "", attempt: 0, retryAt: 0 });
+  const [loadedSrc, setLoadedSrc] = useState("");
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     return () => {
@@ -149,30 +152,42 @@ function PosterImage({
       : attempt === 2
         ? src
         : url;
-  return url && attempt < 3 ? (
-    <img
-      src={image}
-      alt={alt}
-      loading={loading}
-      onLoad={(event) => {
-        event.currentTarget.style.visibility = "visible";
-      }}
-      onError={(event) => {
-        // 重试期间保留卡片背景占位，避免显示浏览器的损坏图片图标。
-        event.currentTarget.style.visibility = "hidden";
-        if (url === src || attempt === 2) {
-          setFailure({ url, attempt: 3, retryAt: 0 });
-        } else if (attempt === 0) {
-          retryTimer.current = setTimeout(() => {
-            setFailure({ url, attempt: 1, retryAt: Date.now() });
-          }, 180);
-        } else {
-          // 代理重试仍失败时，再尝试 WebView 直连原图。
-          setFailure({ url, attempt: 2, retryAt: 0 });
-        }
-      }}
-    />
-  ) : null;
+  const loaded = Boolean(url) && loadedSrc === image;
+  return (
+    <>
+      {/* 海报请求和重试期间显示扫光；最终失败后保留静态占位底色。 */}
+      {showLoading && src && attempt < 3 && !loaded && (
+        <span className="poster-loading" aria-hidden="true" />
+      )}
+      {url && attempt < 3 && (
+        <img
+          className={showLoading && loaded ? "is-loaded" : undefined}
+          src={image}
+          alt={alt}
+          loading={loading}
+          onLoad={(event) => {
+            event.currentTarget.style.visibility = "visible";
+            setLoadedSrc(image);
+          }}
+          onError={(event) => {
+            // 重试期间保留卡片背景占位，避免显示浏览器的损坏图片图标。
+            event.currentTarget.style.visibility = "hidden";
+            setLoadedSrc("");
+            if (url === src || attempt === 2) {
+              setFailure({ url, attempt: 3, retryAt: 0 });
+            } else if (attempt === 0) {
+              retryTimer.current = setTimeout(() => {
+                setFailure({ url, attempt: 1, retryAt: Date.now() });
+              }, 180);
+            } else {
+              // 代理重试仍失败时，再尝试 WebView 直连原图。
+              setFailure({ url, attempt: 2, retryAt: 0 });
+            }
+          }}
+        />
+      )}
+    </>
+  );
 }
 
 function enableMobilePlaybackGestures(art: Artplayer) {
@@ -652,7 +667,7 @@ function Player({
             },
           },
           lang: "zh-cn",
-          theme: "#37c5e2",
+          theme: "#d6bb8a",
           autoplay: true,
           playsInline: true,
           // 左右滑动由本地手势处理并带死区，避免 ArtPlayer 默认无阈值 seek。
@@ -2343,6 +2358,7 @@ export default function App() {
                           <PosterImage
                             src={item.poster}
                             alt={`${item.title}海报`}
+                            showLoading
                           />
                           <span className="poster-play">
                             <Play size={24} fill="currentColor" />
@@ -2572,6 +2588,7 @@ export default function App() {
                             <PosterImage
                               src={item.poster}
                               alt={`${item.title}海报`}
+                              showLoading
                             />
                             <span className="poster-play">
                               <Play size={24} fill="currentColor" />
@@ -2760,6 +2777,7 @@ export default function App() {
                         <PosterImage
                           src={item.poster}
                           alt={`${item.title}海报`}
+                          showLoading
                         />
                         <span className="poster-play">
                           <Play size={24} fill="currentColor" />
