@@ -26,10 +26,10 @@ npm run probe:tvbox -- "https://gh-proxy.com/https://raw.githubusercontent.com/n
 
 ## 开发
 
-需要 Node.js 22 或更新版本。
+需要 Node.js 22 或更新版本，推荐使用与 CI 一致的 Node.js 22。首次拉取代码或换电脑后，先安装项目依赖，再运行开发或打包命令。
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
@@ -59,6 +59,8 @@ npm run dist:android
 
 `android-tv/` 是独立的 Kotlin / Compose 电视应用，不依赖手机端 WebView，最低支持 Android 8.0（API 26），包名为 `com.shuxian.videoclient.tv`，可与手机端同时安装。电视首页顶部为搜索框和设置，下面是电影、电视、综艺、自定义和播放记录菜单。电影和电视保留豆瓣推荐分类标签，综艺沿用豆瓣综艺推荐；自定义菜单保留点播源返回的父分类和子分类。
 
+电视端以 1280×720 的逻辑尺寸为横屏布局基准，海报默认每行 6 张，可在设置的“每行海报数量”中选择 5、6、8 张，切换后立即生效并保存在本机；文字、菜单、间距、弹窗和播放器控件随实际输出分辨率统一缩放，不跟随厂商系统的显示密度和字体缩放，保证同宽高比电视上的界面比例一致。
+
 首次使用在设置中填写 `vod.json` 订阅地址并导入。成人源默认不启用，但可在设置列表中手动启用并选为自定义源；自定义菜单默认使用第一个已启用的源，也可以在设置中选择其他源。搜索只查询已启用的非成人源。设置中不提供并发数输入，搜索内部最多同时请求 6 个源。列表向下翻时自动加载下一页，顶部菜单随列表滚动，返回键可直接回到当前列表顶部。详情页支持选择线路和集数，使用 Media3 原生播放器播放 HLS / MP4；遥控器左右键每次快退或快进 20 秒，播放器内可切换线路、选集和播放下一集，当前线路失败时会尝试同集的其他线路。播放记录保存在电视本机，可继续播放或删除；继续播放会先读取本机缓存的线路和集数，再在后台更新详情，记录卡片显示观看进度。播放器中遥控器返回键回到选集。电视端设置与播放记录不与手机或桌面同步。
 
 电视端播放点播 HLS 时会过滤显式广告标记，并按整组地址特征、短片头和两长段之间的短中插识别广告；直播 HLS、字节范围清单和 MP4 保持原有播放方式。
@@ -85,7 +87,27 @@ API 26 工程已通过 DevEco Studio 26.0.0 编译与调试签名；真机已验
 Windows 安装包使用安装向导，可在安装时选择目录。
 发布新版本时，先更新 `package.json` 的版本号，再推送对应的 `vX.Y.Z` 标签。GitHub Actions 会构建 Windows x64 安装包、Apple Silicon（ARM64）macOS DMG、Android 手机 APK、原生 Android 电视 APK 和 HarmonyOS 签名 HAP，并发布到 GitHub Releases。文件名分别为 `videoClient-vX.Y.Z-windows-x64.exe`、`videoClient-vX.Y.Z-macos-arm64.dmg`、`videoClient-vX.Y.Z-android.apk`、`videoClient-vX.Y.Z-android-tv.apk` 和 `videoClient-vX.Y.Z-harmony.hap`，也可在运行记录的 Artifacts 中下载。桌面端 CI 产物未签名；向其他 Mac 分发前仍需配置 Apple 签名和公证。
 
-GitHub 仓库的 Actions Secrets 需要配置 `ANDROID_KEYSTORE_BASE64`（同一份 JKS 密钥库的 Base64 内容）和 `ANDROID_KEYSTORE_PASSWORD`。工作流只在构建签名版 APK 时读取它们，并核对证书 SHA-256 指纹 `7F:98:3E:F3:2A:1B:69:A8:4E:D1:94:79:78:13:E1:88:C4:66:DD:BC:CE:E1:A7:43:89:0C:6F:36:B5:58:FE:D1`；密钥缺失或签名不一致时直接失败，避免再次发布不同签名的 APK。请在仓库外备份原始 JKS 和密码，后续版本必须继续使用同一密钥。本地 `npm run dist:android` 仍生成调试签名 APK；旧版 GitHub 调试签名 APK 无法用新正式签名直接覆盖安装，需要先卸载一次。
+GitHub 仓库的 Actions Secrets 需要配置 `ANDROID_KEYSTORE_BASE64`（同一份 JKS 密钥库的 Base64 内容）和 `ANDROID_KEYSTORE_PASSWORD`。构建工作流在生成签名版 APK 时读取它们，并核对证书 SHA-256 指纹 `7F:98:3E:F3:2A:1B:69:A8:4E:D1:94:79:78:13:E1:88:C4:66:DD:BC:CE:E1:A7:43:89:0C:6F:36:B5:58:FE:D1`；密钥缺失或签名不一致时直接失败，避免再次发布不同签名的 APK。请在仓库外备份原始 JKS 和密码，后续版本必须继续使用同一密钥。本地 `npm run dist:android` 仍生成调试签名 APK；旧版 GitHub 调试签名 APK 无法用新正式签名直接覆盖安装，需要先卸载一次。
+
+### 找回 GitHub 中的 Android 签名材料
+
+如果本地 JKS 和密码丢失，但仓库里的两项 Secrets 仍在，可通过 `Recover Android signing secrets` 手动工作流加密找回。[GitHub 会遮盖日志中的 Secret](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets)，直接打印通常只会显示 `***`；这里用本机公钥加密，只上传密文。
+
+1. 将新增工作流和脚本推送到默认分支，然后在本机仓库根目录执行以下 PowerShell 命令（不需要 `npm install`）：
+
+   ```powershell
+   node scripts/recover-android-signing.mjs prepare
+   Get-Content -Raw .\android-signing-recovery\recovery-public-key-base64.txt | Set-Clipboard
+   ```
+
+2. 在 GitHub 的 **Actions → Recover Android signing secrets → Run workflow** 中，选择默认分支，把剪贴板里的公钥粘贴到 `recovery_public_key` 输入框并运行。不要上传 `recovery-private-key.pem`。
+3. 下载该次运行的 `android-signing-recovery-运行编号` Artifact，将其中的 `android-signing-secrets.enc.json` 解压到本机 `android-signing-recovery/` 目录，然后执行：
+
+   ```powershell
+   node scripts/recover-android-signing.mjs decrypt .\android-signing-recovery\android-signing-secrets.enc.json
+   ```
+
+解密后，仓库根目录会还原 `videoclient-release.jks` 和 `signing-password.txt`，可直接继续本地签名构建；两项原始环境变量保存在 `android-signing-recovery/android-signing-secrets.json`。脚本不会在终端显示密钥或密码，也不会覆盖已有签名文件。找回目录已加入 Git 忽略，包含解密私钥和明文结果，请另行安全备份；GitHub 上的加密 Artifact 只保留 1 天。该流程使用仓库 Secrets，与现有 APK 构建一致。
 
 ### GitHub 上的鸿蒙构建设置
 

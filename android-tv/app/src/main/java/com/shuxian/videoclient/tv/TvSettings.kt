@@ -222,6 +222,11 @@ class TvSettings(context: Context) {
         get() = getSetting("exact_search") == "true"
         set(value) { setSetting("exact_search", value.toString()) }
 
+    // 旧安装没有保存列数时默认六列，只读取界面提供的三档数量。
+    var posterColumns: Int
+        get() = getSetting("poster_columns")?.toIntOrNull()?.takeIf { it in listOf(5, 6, 8) } ?: 6
+        set(value) { setSetting("poster_columns", value.toString()) }
+
     var selectedSourceUrl: String
         get() = getSetting("selected_source_url").orEmpty()
         set(value) { setSetting("selected_source_url", value) }

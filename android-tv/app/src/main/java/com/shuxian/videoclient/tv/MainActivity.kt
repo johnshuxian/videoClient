@@ -1,7 +1,10 @@
 package com.shuxian.videoclient.tv
 
+import android.content.Context
+import android.content.res.Configuration
 import android.os.Bundle
 import android.os.SystemClock
+import android.util.DisplayMetrics
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -111,6 +114,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 // 电视端用深色内容背景与暖橙焦点色，保证远距离观看时文字和遥控器焦点清楚。
 private val background = Color(0xFF101014)
@@ -130,6 +134,23 @@ private data class OtherSourcePrompt(
 )
 
 class MainActivity : ComponentActivity() {
+    override fun attachBaseContext(newBase: Context) {
+        val metrics = newBase.resources.displayMetrics
+        // TV 固定横屏，以 1280dp 宽的默认六列布局为基准，按实际输出分辨率统一缩放。
+        val widthPixels = maxOf(metrics.widthPixels, metrics.heightPixels)
+        val heightPixels = minOf(metrics.widthPixels, metrics.heightPixels)
+        val tvDensityDpi = (widthPixels * DisplayMetrics.DENSITY_DEFAULT / 1280f).roundToInt()
+        super.attachBaseContext(newBase)
+        // 必须在主题和界面读取资源前设置，让 Compose、弹窗和原生播放器共用同一套 dp / sp。
+        applyOverrideConfiguration(Configuration().apply {
+            densityDpi = tvDensityDpi
+            fontScale = 1f
+            screenWidthDp = 1280
+            screenHeightDp = (heightPixels * DisplayMetrics.DENSITY_DEFAULT.toFloat() / tvDensityDpi).roundToInt()
+            smallestScreenWidthDp = screenHeightDp
+        })
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.getInsetsController(window, window.decorView).apply {
@@ -215,7 +236,8 @@ private fun TvApp(onExit: () -> Unit) {
     var settingsError by remember { mutableStateOf("") }
     var settingsMessage by remember { mutableStateOf("") }
     val browseGridState = rememberLazyGridState()
-    val browseGridColumns by remember { derivedStateOf { browseGridState.layoutInfo.maxSpan } }
+    // 网格和首行遥控器焦点共用列数设置，切换后同步更新。
+    var browseGridColumns by remember { mutableIntStateOf(settings.posterColumns) }
     // 遥控器跨行返回当前选中的标签，不让空间距离决定落到哪个分类。
     val selectedFilterFocus = remember { FocusRequester() }
     val selectedParentFocus = remember { FocusRequester() }
@@ -818,6 +840,21 @@ private fun TvApp(onExit: () -> Unit) {
                             settings.exactSearch = exactSearch
                         })
                     }
+                    Label("显示", 20, white, bold = true)
+                    Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Label("每行海报数量", 18, white, bold = true)
+                            Label("数量越多，海报越小；切换后立即生效", 15, muted, Modifier.padding(top = 5.dp))
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            listOf(5, 6, 8).forEach { columns ->
+                                FocusButton("${columns} 张", selected = browseGridColumns == columns, tab = true, onClick = {
+                                    browseGridColumns = columns
+                                    settings.posterColumns = columns
+                                })
+                            }
+                        }
+                    }
                     Label("点播源 · ${sources.count { it.enabled }} 个已启用", 20, white, bold = true)
                     Label("成人源可启用并在“自定义”中浏览，不参与搜索。", 15, muted, Modifier.padding(top = 6.dp, bottom = 14.dp))
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.weight(1f)) {
@@ -862,7 +899,8 @@ private fun TvApp(onExit: () -> Unit) {
                     categories.any { it.id == child.parentId }
                 } == true
                 LazyVerticalGrid(
-                    columns = GridCells.Adaptive(170.dp),
+                    // 海报按设置列数等分宽度，文字和菜单继续使用统一的缩放比例。
+                    columns = GridCells.Fixed(browseGridColumns),
                     state = browseGridState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(horizontal = 42.dp, vertical = 22.dp),

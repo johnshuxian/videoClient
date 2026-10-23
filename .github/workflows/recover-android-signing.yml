@@ -1,0 +1,40 @@
+name: Recover Android signing secrets
+
+# 只允许手动找回；输入的是本机公钥，私钥始终留在本机。
+on:
+  workflow_dispatch:
+    inputs:
+      recovery_public_key:
+        description: Base64 public key from recover-android-signing.mjs prepare
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Test encrypted recovery
+        run: node --test scripts/recover-android-signing.test.mjs
+
+      - name: Encrypt signing secrets for local recovery
+        env:
+          ANDROID_RECOVERY_PUBLIC_KEY: ${{ inputs.recovery_public_key }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: node scripts/recover-android-signing.mjs encrypt "$RUNNER_TEMP/android-signing-secrets.enc.json"
+
+      # 仅上传密文，不把原始 Secret、JKS 或密码写入日志及产物。
+      - uses: actions/upload-artifact@v7
+        with:
+          name: android-signing-recovery-${{ github.run_id }}
+          path: ${{ runner.temp }}/android-signing-secrets.enc.json
+          if-no-files-found: error
+          retention-days: 1
