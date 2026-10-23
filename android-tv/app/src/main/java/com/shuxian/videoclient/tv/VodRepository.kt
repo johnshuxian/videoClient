@@ -2,6 +2,7 @@ package com.shuxian.videoclient.tv
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.ThumbnailUtils
 import android.net.Uri
 import android.util.LruCache
 import kotlinx.coroutines.Dispatchers
@@ -9,6 +10,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
@@ -20,7 +24,7 @@ import java.net.URL
 
 data class VodSource(val name: String, val url: String, val isAdult: Boolean, val enabled: Boolean)
 data class VodCategory(val id: Int, val name: String, val parentId: Int)
-data class CatalogItem(val title: String, val poster: String, val rating: String, val info: String)
+data class CatalogItem(val id: String, val title: String, val poster: String, val rating: String, val info: String)
 data class VideoItem(
     val id: String,
     val title: String,
@@ -30,7 +34,9 @@ data class VideoItem(
     val sourceName: String,
     val sourceUrl: String,
     val rating: String,
-)
+) {
+    val key: String get() = "$sourceUrl:$id"
+}
 data class Episode(val label: String, val url: String)
 data class PlayLine(val name: String, val episodes: List<Episode>)
 data class VideoDetail(
@@ -49,6 +55,8 @@ class VodRepository {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount
     }
     private val posterSemaphore = Semaphore(4)
+    private val posterPrefetchSemaphore = Semaphore(2)
+    private val posterLocks = HashMap<String, Mutex>()
 
     private fun endpoint(address: String, vararg parameters: Pair<String, String>): String {
         val original = Uri.parse(address)
@@ -111,7 +119,7 @@ class VodRepository {
         return sources
     }
 
-    suspend fun catalog(section: String, tag: String, page: Int): List<CatalogItem> {
+    suspend fun catalog(section: String, tag: String, page: Int): List<CatalogItem> = withContext(Dispatchers.IO) {
         val type = if (section == "variety") "tv" else section
         val actualTag = when {
             section == "variety" -> "综艺"
@@ -127,20 +135,20 @@ class VodRepository {
             "page_start" to (page * 24).toString(),
         )
         val subjects = json(address).optJSONArray("subjects") ?: JSONArray()
-        return buildList {
+        buildList {
             for (index in 0 until subjects.length()) {
                 val item = subjects.optJSONObject(index) ?: continue
                 val title = item.optString("title")
                 if (title.isNotBlank()) add(
-                    CatalogItem(title, item.optString("cover"), item.optString("rate"), item.optString("episodes_info"))
+                    CatalogItem(item.optString("id").ifBlank { title }, title, item.optString("cover"), item.optString("rate"), item.optString("episodes_info"))
                 )
             }
         }
     }
 
-    suspend fun categories(source: VodSource): List<VodCategory> {
+    suspend fun categories(source: VodSource): List<VodCategory> = withContext(Dispatchers.IO) {
         val entries = json(source.url).optJSONArray("class") ?: error("该点播源没有分类信息")
-        return buildList {
+        buildList {
             for (index in 0 until entries.length()) {
                 val item = entries.optJSONObject(index) ?: continue
                 val id = item.optInt("type_id")
@@ -166,7 +174,7 @@ class VodRepository {
         )
     }
 
-    suspend fun sourceCatalog(source: VodSource, categoryId: Int?, page: Int): VodPage {
+    suspend fun sourceCatalog(source: VodSource, categoryId: Int?, page: Int): VodPage = withContext(Dispatchers.IO) {
         val parameters = mutableListOf("ac" to "videolist", "pg" to page.toString())
         if (categoryId != null) parameters.add("t" to categoryId.toString())
         val data = json(endpoint(source.url, *parameters.toTypedArray()))
@@ -177,7 +185,7 @@ class VodRepository {
                 entries.optJSONObject(index)?.let { entry -> videoItem(entry, source)?.let { add(it) } }
             }
         }
-        return VodPage(items, page < data.optInt("pagecount", page))
+        VodPage(items, page < data.optInt("pagecount", page))
     }
 
     suspend fun search(
@@ -186,7 +194,7 @@ class VodRepository {
         onProgress: (completed: Int, total: Int, items: List<VideoItem>, failure: String?) -> Unit,
     ) = coroutineScope {
         val semaphore = Semaphore(6) // 源多时限制同时请求的数量，设置页不暴露这个内部参数。
-        val enabled = sources.filter { it.enabled && !it.isAdult }
+        val enabled = sources.filter { it.enabled && !it.isAdult }.distinctBy { it.url }
         var completed = 0
         enabled.map { source ->
             async {
@@ -194,13 +202,16 @@ class VodRepository {
                     var items = emptyList<VideoItem>()
                     var failure: String? = null
                     try {
-                        val response = json(endpoint(source.url, "ac" to "videolist", "wd" to query), 8_500)
-                        val entries = response.optJSONArray("list")
-                        if (entries == null && response.optInt("total", -1) != 0) error("搜索接口未返回影片列表")
-                        items = buildList {
-                            if (entries == null) return@buildList
-                            for (index in 0 until entries.length()) {
-                                entries.optJSONObject(index)?.let { entry -> videoItem(entry, source)?.let { add(it) } }
+                        // JSON 和海报地址解析也在后台完成，多个源同时返回时不占用遥控器响应线程。
+                        items = withContext(Dispatchers.IO) {
+                            val response = json(endpoint(source.url, "ac" to "videolist", "wd" to query), 8_500)
+                            val entries = response.optJSONArray("list")
+                            if (entries == null && response.optInt("total", -1) != 0) error("搜索接口未返回影片列表")
+                            buildList {
+                                if (entries == null) return@buildList
+                                for (index in 0 until entries.length()) {
+                                    entries.optJSONObject(index)?.let { entry -> videoItem(entry, source)?.let { add(it) } }
+                                }
                             }
                         }
                     } catch (cancelled: CancellationException) {
@@ -248,32 +259,51 @@ class VodRepository {
         return URL(URL(address), resolved).toString()
     }
 
-    suspend fun poster(address: String): Bitmap? {
+    private fun posterKey(address: String, width: Int) = "$address@${((width.coerceAtLeast(64) + 63) / 64) * 64}"
+
+    fun cachedPoster(address: String, width: Int = 320): Bitmap? =
+        synchronized(posterCache) { posterCache.get(posterKey(address, width)) }
+
+    suspend fun prefetchPosters(addresses: List<String>, width: Int) = coroutineScope {
+        addresses.distinct().filter { it.isNotBlank() && cachedPoster(it, width) == null }.forEach { address ->
+            launch { poster(address, width, prefetch = true) }
+        }
+    }
+
+    suspend fun poster(address: String, width: Int = 320, prefetch: Boolean = false): Bitmap? {
         if (address.isBlank()) return null
-        synchronized(posterCache) { posterCache.get(address) }?.let { return it }
-        return withContext(Dispatchers.IO) {
+        // 屏幕外请求最多占两个下载名额，可见卡片保留独立的响应空间。
+        if (prefetch) return posterPrefetchSemaphore.withPermit { poster(address, width) }
+        val key = posterKey(address, width)
+        cachedPoster(address, width)?.let { return it }
+        // 预取与可见卡片请求同一张图时共用锁，不重复占用下载和解码资源。
+        val lock = synchronized(posterLocks) { posterLocks.getOrPut(key) { Mutex() } }
+        return lock.withLock { withContext(Dispatchers.IO) {
             posterSemaphore.withPermit {
-                synchronized(posterCache) { posterCache.get(address) }?.let { return@withPermit it }
+                cachedPoster(address, width)?.let { return@withPermit it }
                 try {
                     val request = connection(address)
                     try {
-                        // 网格海报只显示约 170dp，按显示尺寸解码可减少下移时的内存分配和纹理上传。
+                        // 缓存按 64px 分档，最终裁成实际卡片尺寸，避免原图占满内存缓存。
+                        val targetWidth = ((width.coerceAtLeast(64) + 63) / 64) * 64
+                        val targetHeight = (targetWidth / .72f).toInt()
                         val bytes = request.inputStream.use { it.readBytes() }
                         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
                         var sampleSize = 1
-                        while (bounds.outWidth / (sampleSize * 2) >= 400 && bounds.outHeight / (sampleSize * 2) >= 600) {
+                        while (bounds.outWidth / (sampleSize * 2) >= targetWidth && bounds.outHeight / (sampleSize * 2) >= targetHeight) {
                             sampleSize *= 2
                         }
-                        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size,
+                        val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size,
                             BitmapFactory.Options().apply { inSampleSize = sampleSize })
-                        if (bitmap != null) synchronized(posterCache) { posterCache.put(address, bitmap) }
+                        val bitmap = decoded?.let { ThumbnailUtils.extractThumbnail(it, targetWidth, targetHeight, ThumbnailUtils.OPTIONS_RECYCLE_INPUT) }
+                        if (bitmap != null) synchronized(posterCache) { posterCache.put(key, bitmap) }
                         bitmap
                     } finally { request.disconnect() }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (_: Exception) { null }
             }
-        }
+        } }
     }
 }

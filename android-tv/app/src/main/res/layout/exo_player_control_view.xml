@@ -1,24 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Media3 只绘制进度与其他底栏控件；播放状态图标由 Compose 在画面中央绘制。 -->
-<merge xmlns:android="http://schemas.android.com/apk/res/android">
+<merge xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <View
         android:id="@id/exo_controls_background"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:background="@android:color/transparent" />
+        android:layout_width="match_parent"
+        android:layout_height="160dp"
+        android:layout_gravity="bottom"
+        android:background="@drawable/tv_player_scrim" />
 
     <FrameLayout
         android:id="@id/exo_bottom_bar"
         android:layout_width="match_parent"
-        android:layout_height="@dimen/exo_styled_bottom_bar_height"
+        android:layout_height="72dp"
         android:layout_marginTop="@dimen/exo_styled_bottom_bar_margin_top"
         android:layout_gravity="bottom"
-        android:background="@color/exo_bottom_bar_background"
+        android:background="@android:color/transparent"
         android:layoutDirection="ltr">
 
         <LinearLayout
             android:id="@id/exo_time"
+            android:orientation="horizontal"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="center_vertical|start"
@@ -40,6 +43,7 @@
 
         <LinearLayout
             android:id="@id/exo_basic_controls"
+            android:orientation="horizontal"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="center_vertical|end"
@@ -63,6 +67,7 @@
 
             <LinearLayout
                 android:id="@id/exo_extra_controls"
+                android:orientation="horizontal"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layoutDirection="ltr">
@@ -72,15 +77,21 @@
         </HorizontalScrollView>
     </FrameLayout>
 
-    <View
-        android:id="@id/exo_progress_placeholder"
+    <androidx.media3.ui.DefaultTimeBar
+        android:id="@id/exo_progress"
         android:layout_width="match_parent"
-        android:layout_height="@dimen/exo_styled_progress_layout_height"
+        android:layout_height="48dp"
         android:layout_gravity="bottom"
-        android:layout_marginBottom="@dimen/exo_styled_progress_margin_bottom" />
+        android:layout_marginBottom="64dp"
+        app:bar_height="4dp"
+        app:touch_target_height="48dp"
+        app:scrubber_enabled_size="12dp"
+        app:scrubber_dragged_size="20dp"
+        app:played_color="#FF792C" />
 
     <LinearLayout
         android:id="@id/exo_minimal_controls"
+        android:orientation="horizontal"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|end"
@@ -91,12 +102,14 @@
 
     <LinearLayout
         android:id="@id/exo_center_controls"
+        android:orientation="horizontal"
         android:layout_width="0dp"
         android:layout_height="0dp"
         android:layout_gravity="center" />
 
     <LinearLayout
         android:id="@+id/exo_top_controls"
+        android:orientation="horizontal"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="top|end">
@@ -107,4 +120,21 @@
             android:layout_height="wrap_content"
             android:visibility="gone" />
     </LinearLayout>
+
+    <!-- 提示按实际聚焦控件的位置摆放，和控制栏一起显示、隐藏。 -->
+    <TextView
+        android:id="@+id/tv_control_hint"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:background="@drawable/tv_control_hint_background"
+        android:paddingHorizontal="14dp"
+        android:paddingVertical="8dp"
+        android:textColor="#FFFFFF"
+        android:textSize="20sp"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:focusable="false"
+        android:importantForAccessibility="no"
+        android:visibility="invisible" />
 </merge>
