@@ -59,8 +59,16 @@ try {
       tag: cipher.getAuthTag().toString('base64'),
       data: data.toString('base64'),
     };
-    writeFileSync(resolve(process.argv[3]), JSON.stringify(envelope), { flag: 'wx', mode: 0o600 });
-    console.log('已生成加密的签名材料，请下载 Artifact 后在本机解密。');
+    if (process.argv[3] === '-') {
+      // 分行输出加密包，方便从 Actions 日志复制，也避免单行过长被截断。
+      const encoded = Buffer.from(JSON.stringify(envelope)).toString('base64');
+      console.log('-----BEGIN ANDROID SIGNING RECOVERY-----');
+      console.log(encoded.match(/.{1,120}/g).join('\n'));
+      console.log('-----END ANDROID SIGNING RECOVERY-----');
+    } else {
+      writeFileSync(resolve(process.argv[3]), JSON.stringify(envelope), { flag: 'wx', mode: 0o600 });
+      console.log('已生成加密的签名材料，请将密文文件保存到本机解密。');
+    }
   } else if (command === 'decrypt' && process.argv[3]) {
     const secretsPath = join(recoveryDirectory, 'android-signing-secrets.json');
     const storePath = join(root, 'videoclient-release.jks');
@@ -69,7 +77,10 @@ try {
       console.error('签名文件或解密结果已存在，请先备份并移走，防止覆盖。');
       process.exit(1);
     }
-    const envelope = JSON.parse(readFileSync(resolve(process.argv[3]), 'utf8'));
+    const input = readFileSync(resolve(process.argv[3]), 'utf8').trim();
+    // 同时支持日志里的密文块和此前下载的加密 JSON 文件，沿用原来的本机私钥。
+    const block = input.match(/-----BEGIN ANDROID SIGNING RECOVERY-----([\s\S]*?)-----END ANDROID SIGNING RECOVERY-----/);
+    const envelope = JSON.parse(block ? Buffer.from(block[1], 'base64').toString('utf8') : input);
     const key = privateDecrypt({
       key: readFileSync(privateKeyPath),
       padding: constants.RSA_PKCS1_OAEP_PADDING,
@@ -89,7 +100,7 @@ try {
     writeFileSync(passwordPath, secrets.ANDROID_KEYSTORE_PASSWORD, { flag: 'wx', mode: 0o600 });
     console.log('已还原 videoclient-release.jks、signing-password.txt；两个原始环境变量保存在 android-signing-recovery/android-signing-secrets.json。');
   } else {
-    console.error('用法：node scripts/recover-android-signing.mjs prepare | encrypt <密文输出路径> | decrypt <下载的密文路径>');
+    console.error('用法：node scripts/recover-android-signing.mjs prepare | encrypt <密文输出路径或 -> | decrypt <密文文件路径>');
     process.exitCode = 1;
   }
 } catch (error) {

@@ -24,17 +24,10 @@ jobs:
       - name: Test encrypted recovery
         run: node --test scripts/recover-android-signing.test.mjs
 
-      - name: Encrypt signing secrets for local recovery
+      # 仅打印加密密文，不上传 Artifact，不受 Artifact 存储配额影响。
+      - name: Print encrypted recovery data
         env:
           ANDROID_RECOVERY_PUBLIC_KEY: ${{ inputs.recovery_public_key }}
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-        run: node scripts/recover-android-signing.mjs encrypt "$RUNNER_TEMP/android-signing-secrets.enc.json"
-
-      # 仅上传密文，不把原始 Secret、JKS 或密码写入日志及产物。
-      - uses: actions/upload-artifact@v7
-        with:
-          name: android-signing-recovery-${{ github.run_id }}
-          path: ${{ runner.temp }}/android-signing-secrets.enc.json
-          if-no-files-found: error
-          retention-days: 1
+        run: node scripts/recover-android-signing.mjs encrypt -

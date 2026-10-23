@@ -91,7 +91,7 @@ GitHub 仓库的 Actions Secrets 需要配置 `ANDROID_KEYSTORE_BASE64`（同一
 
 ### 找回 GitHub 中的 Android 签名材料
 
-如果本地 JKS 和密码丢失，但仓库里的两项 Secrets 仍在，可通过 `Recover Android signing secrets` 手动工作流加密找回。[GitHub 会遮盖日志中的 Secret](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets)，直接打印通常只会显示 `***`；这里用本机公钥加密，只上传密文。
+如果本地 JKS 和密码丢失，但仓库里的两项 Secrets 仍在，可通过 `Recover Android signing secrets` 手动工作流加密找回。[GitHub 会遮盖日志中的 Secret](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets)，直接打印通常只会显示 `***`；这里用本机公钥加密，只打印密文，不占用 Artifact 存储配额。
 
 1. 将新增工作流和脚本推送到默认分支，然后在本机仓库根目录执行以下 PowerShell 命令（不需要 `npm install`）：
 
@@ -101,13 +101,14 @@ GitHub 仓库的 Actions Secrets 需要配置 `ANDROID_KEYSTORE_BASE64`（同一
    ```
 
 2. 在 GitHub 的 **Actions → Recover Android signing secrets → Run workflow** 中，选择默认分支，把剪贴板里的公钥粘贴到 `recovery_public_key` 输入框并运行。不要上传 `recovery-private-key.pem`。
-3. 下载该次运行的 `android-signing-recovery-运行编号` Artifact，将其中的 `android-signing-secrets.enc.json` 解压到本机 `android-signing-recovery/` 目录，然后执行：
+3. 运行成功后，展开 `Print encrypted recovery data` 步骤，复制从 `-----BEGIN ANDROID SIGNING RECOVERY-----` 到 `-----END ANDROID SIGNING RECOVERY-----` 的完整内容（包含这两行，不包含日志时间戳）。在本机仓库根目录执行以下 PowerShell 命令，把剪贴板里的密文保存后解密：
 
    ```powershell
-   node scripts/recover-android-signing.mjs decrypt .\android-signing-recovery\android-signing-secrets.enc.json
+   Get-Clipboard -Raw | Set-Content -Encoding ascii .\android-signing-recovery\recovery-log.txt
+   node scripts/recover-android-signing.mjs decrypt .\android-signing-recovery\recovery-log.txt
    ```
 
-解密后，仓库根目录会还原 `videoclient-release.jks` 和 `signing-password.txt`，可直接继续本地签名构建；两项原始环境变量保存在 `android-signing-recovery/android-signing-secrets.json`。脚本不会在终端显示密钥或密码，也不会覆盖已有签名文件。找回目录已加入 Git 忽略，包含解密私钥和明文结果，请另行安全备份；GitHub 上的加密 Artifact 只保留 1 天。该流程使用仓库 Secrets，与现有 APK 构建一致。
+解密后，仓库根目录会还原 `videoclient-release.jks` 和 `signing-password.txt`，可直接继续本地签名构建；两项原始环境变量保存在 `android-signing-recovery/android-signing-secrets.json`。脚本不会在终端显示密钥或密码，也不会覆盖已有签名文件。找回目录已加入 Git 忽略，包含解密私钥和明文结果，请另行安全备份。此前生成的公钥和私钥可以继续使用，原先下载的加密 JSON 文件也仍可解密。该流程使用仓库 Secrets，与现有 APK 构建一致。
 
 ### GitHub 上的鸿蒙构建设置
 

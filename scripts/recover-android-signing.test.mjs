@@ -30,7 +30,7 @@ function createRecovery(t) {
     ANDROID_KEYSTORE_BASE64: randomBytes(8192).toString('base64'),
     ANDROID_KEYSTORE_PASSWORD: '测试 password $`"\\ with spaces\n',
   };
-  const encrypt = () => run(['encrypt', encryptedPath], {
+  const encrypt = (output = encryptedPath) => run(['encrypt', output], {
     ...secrets,
     ANDROID_RECOVERY_PUBLIC_KEY: readFileSync(join(directory, 'recovery-public-key-base64.txt'), 'utf8'),
   });
@@ -73,6 +73,32 @@ test('密文被篡改时拒绝解密，不写出明文', (t) => {
   assert.ok(!existsSync(join(recovery.directory, 'android-signing-secrets.json')));
   assert.ok(!existsSync(join(recovery.root, 'videoclient-release.jks')));
   assert.ok(!existsSync(join(recovery.root, 'signing-password.txt')));
+});
+
+test('从日志复制的密文块能还原原始变量，不生成 Artifact 文件或泄露明文', (t) => {
+  const recovery = createRecovery(t);
+  const encrypted = recovery.encrypt('-');
+  assert.equal(encrypted.status, 0, encrypted.stderr);
+  assert.ok(!existsSync(recovery.encryptedPath));
+  assert.ok(encrypted.stdout.startsWith('-----BEGIN ANDROID SIGNING RECOVERY-----\n'));
+  assert.ok(encrypted.stdout.endsWith('-----END ANDROID SIGNING RECOVERY-----\n'));
+  for (const value of Object.values(recovery.secrets)) {
+    assert.ok(!(encrypted.stdout + encrypted.stderr).includes(value));
+  }
+
+  // 模拟 Windows 剪贴板保存后的 CRLF 换行、BOM，以及选中时多复制的说明文字。
+  const logPath = join(recovery.directory, 'recovery-log.txt');
+  writeFileSync(logPath, `\uFEFF复制的日志\r\n${encrypted.stdout.replace(/\n/g, '\r\n')}\r\n复制结束`);
+  const decrypted = recovery.run(['decrypt', logPath]);
+  assert.equal(decrypted.status, 0, decrypted.stderr);
+  assert.deepEqual(
+    JSON.parse(readFileSync(join(recovery.directory, 'android-signing-secrets.json'), 'utf8')),
+    recovery.secrets,
+  );
+  assert.deepEqual(readFileSync(join(recovery.root, 'videoclient-release.jks')),
+    Buffer.from(recovery.secrets.ANDROID_KEYSTORE_BASE64, 'base64'));
+  assert.equal(readFileSync(join(recovery.root, 'signing-password.txt'), 'utf8'),
+    recovery.secrets.ANDROID_KEYSTORE_PASSWORD);
 });
 
 test('私钥不匹配时拒绝解密，不写出明文', (t) => {
