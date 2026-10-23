@@ -110,6 +110,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -253,6 +254,7 @@ private fun TvApp(onExit: () -> Unit) {
     var navigationToken by remember { mutableIntStateOf(0) }
     var usedNavigationToken by remember { mutableIntStateOf(0) }
     var initialBrowseFocusPending by remember { mutableStateOf(true) }
+    var headerFocusJob by remember { mutableStateOf<Job?>(null) }
     LaunchedEffect(screen) {
         if (screen == "settings") {
             withFrameNanos { }
@@ -265,6 +267,28 @@ private fun TvApp(onExit: () -> Unit) {
         if (navigationToken != usedNavigationToken) {
             usedNavigationToken = navigationToken
             action()
+        }
+    }
+
+    // 顶部滚出网格后会被懒加载移除，先滚回并等待布局完成，再请求分类或菜单焦点。
+    fun Modifier.focusHeaderOnUp(target: FocusRequester): Modifier = onPreviewKeyEvent { event ->
+        if (event.key != Key.DirectionUp) {
+            false
+        } else {
+            // 长按方向键时只保留一次正在进行的恢复，避免多个滚动请求互相打断。
+            if (event.type == KeyEventType.KeyDown && headerFocusJob?.isActive != true) {
+                val currentScreen = screen
+                val currentSection = section
+                headerFocusJob = scope.launch {
+                    browseGridState.scrollToItem(0)
+                    withFrameNanos { }
+                    if (screen == currentScreen && section == currentSection) {
+                        usedNavigationToken = navigationToken
+                        target.requestFocus()
+                    }
+                }
+            }
+            true
         }
     }
 
@@ -1023,8 +1047,10 @@ private fun TvApp(onExit: () -> Unit) {
                                 }
                             }
                         }
-                        items(visibleSearchResults, key = { "${it.sourceUrl}:${it.id}" }) { video ->
-                            PosterCard(video.title, video.poster, listOf(video.sourceName, video.remarks).filter { it.isNotBlank() }.joinToString(" · "), repository, onFocus = { usedNavigationToken = navigationToken }) { openDetail(video) }
+                        itemsIndexed(visibleSearchResults, key = { _, video -> "${video.sourceUrl}:${video.id}" }) { index, video ->
+                            PosterCard(video.title, video.poster, listOf(video.sourceName, video.remarks).filter { it.isNotBlank() }.joinToString(" · "), repository,
+                                modifier = if (index < browseGridColumns) Modifier.focusHeaderOnUp(searchFieldFocus) else Modifier,
+                                onFocus = { usedNavigationToken = navigationToken }) { openDetail(video) }
                         }
                     } else if (section == "history") {
                         item(span = { GridItemSpan(maxLineSpan) }) {
@@ -1087,7 +1113,7 @@ private fun TvApp(onExit: () -> Unit) {
                                                     name, selected = tag == name, tab = true,
                                                     modifier = Modifier
                                                         .then(if (tag == name) Modifier.focusRequester(selectedFilterFocus) else Modifier)
-                                                        .focusProperties { up = menuFocus.getValue(lastFocusedMenu) },
+                                                        .focusHeaderOnUp(menuFocus.getValue(lastFocusedMenu)),
                                                     onFocus = { selectOnRemoteFocus(chooseTag) }, onClick = chooseTag,
                                                 )
                                             }
@@ -1108,7 +1134,7 @@ private fun TvApp(onExit: () -> Unit) {
                                             FocusButton("全部", selected = categoryId == null, tab = true,
                                                 modifier = Modifier
                                                     .then(if (categoryId == null) Modifier.focusRequester(selectedParentFocus) else Modifier)
-                                                    .focusProperties { up = menuFocus.getValue(lastFocusedMenu) },
+                                                    .focusHeaderOnUp(menuFocus.getValue(lastFocusedMenu)),
                                                 onFocus = { selectOnRemoteFocus(chooseAll) }, onClick = chooseAll)
                                         }
                                         items(roots) { category ->
@@ -1122,8 +1148,8 @@ private fun TvApp(onExit: () -> Unit) {
                                                 category.name, selected = parentId == category.id, tab = true,
                                                 modifier = Modifier
                                                     .then(if (parentId == category.id) Modifier.focusRequester(selectedParentFocus) else Modifier)
+                                                    .focusHeaderOnUp(menuFocus.getValue(lastFocusedMenu))
                                                     .focusProperties {
-                                                        up = menuFocus.getValue(lastFocusedMenu)
                                                         if (children.isNotEmpty()) down = selectedChildFocus
                                                     },
                                                 onFocus = { selectOnRemoteFocus(chooseCategory) }, onClick = chooseCategory,
@@ -1143,7 +1169,7 @@ private fun TvApp(onExit: () -> Unit) {
                                                         category.name, selected = categoryId == category.id, tab = true,
                                                         modifier = Modifier
                                                             .then(if (categoryId == category.id) Modifier.focusRequester(selectedChildFocus) else Modifier)
-                                                            .focusProperties { up = selectedParentFocus },
+                                                            .focusHeaderOnUp(selectedParentFocus),
                                                         onFocus = { selectOnRemoteFocus(chooseChild) }, onClick = chooseChild,
                                                     )
                                                 }
@@ -1163,19 +1189,19 @@ private fun TvApp(onExit: () -> Unit) {
                         if (section == "custom") {
                             itemsIndexed(videos, key = { _, video -> "${video.sourceUrl}:${video.id}" }) { index, video ->
                                 PosterCard(video.title, video.poster, listOf(video.sourceName, video.remarks).filter { it.isNotBlank() }.joinToString(" · "), repository,
-                                    modifier = if (index < browseGridColumns) Modifier.focusProperties {
-                                        up = if (selectedCustomChild) selectedChildFocus else selectedParentFocus
-                                    } else Modifier,
+                                    modifier = if (index < browseGridColumns) Modifier.focusHeaderOnUp(
+                                        if (selectedCustomChild) selectedChildFocus else selectedParentFocus,
+                                    ) else Modifier,
                                     onFocus = { usedNavigationToken = navigationToken }) { openDetail(video) }
                             }
                         } else {
                             itemsIndexed(catalog) { index, video ->
                                 PosterCard(video.title, video.poster, video.rating.takeIf { it.isNotBlank() }?.let { "★ $it" } ?: video.info, repository,
-                                    modifier = when {
-                                        section == "variety" && index == 0 -> Modifier.focusRequester(firstPosterFocus).focusProperties { up = menuFocus.getValue(lastFocusedMenu) }
-                                        section != "variety" && index < browseGridColumns -> Modifier.focusProperties { up = selectedFilterFocus }
-                                        else -> Modifier
-                                    },
+                                    modifier = Modifier
+                                        .then(if (section == "variety" && index == 0) Modifier.focusRequester(firstPosterFocus) else Modifier)
+                                        .then(if (index < browseGridColumns) Modifier.focusHeaderOnUp(
+                                            if (section == "variety") menuFocus.getValue(lastFocusedMenu) else selectedFilterFocus,
+                                        ) else Modifier),
                                     onFocus = { usedNavigationToken = navigationToken }) { search(video.title) }
                             }
                         }

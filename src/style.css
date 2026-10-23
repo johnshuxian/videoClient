@@ -1157,6 +1157,13 @@ a {
 .episode-list::-webkit-scrollbar-button {
   display: none;
 }
+.platform-darwin .detail-overlay {
+  /* 两行顶栏共用不透明底色，避免毛玻璃叠色形成接缝。 */
+  --mac-detail-header-bg: #111218;
+}
+.platform-darwin.light .detail-overlay {
+  --mac-detail-header-bg: #f8f9fc;
+}
 .mac-detail-titlebar {
   /* Mac 详情页为原生窗口按钮单独留一行，返回按钮放在下方工具栏。 */
   height: 34px;
@@ -1164,17 +1171,20 @@ a {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #111218;
+  background: var(--mac-detail-header-bg);
   color: #7893a5;
   font-size: 12px;
   -webkit-app-region: drag;
 }
 .light .mac-detail-titlebar {
-  background: #f8f9fc;
   color: #58788d;
 }
-.platform-darwin .detail-toolbar {
+.platform-darwin .detail-overlay .detail-toolbar {
   height: 48px;
+  background: var(--mac-detail-header-bg);
+  border-bottom: 0;
+  backdrop-filter: none;
+  box-shadow: none;
 }
 .detail-toolbar {
   height: 65px;
