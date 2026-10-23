@@ -164,6 +164,35 @@ class TvListStateTest {
     }
 
     @Test
+    fun temporarySearchFocusDoesNotCancelThePendingHistoryRow() {
+        val state = TvListState()
+        state.restorationComplete()
+        state.posterFocused("history:3")
+        state.focusPoster(4)
+        assertFalse(state.focusHeader(TvHeaderFocus.Search))
+        assertEquals(4, state.pendingIndex)
+        assertEquals("history:3", state.focusedKey)
+        state.posterFocused("history:4")
+        state.focusCompleted()
+        assertTrue(state.focusHeader(TvHeaderFocus.ClearHistory))
+        assertNull(state.focusedKey)
+        assertEquals(TvHeaderFocus.ClearHistory, state.headerFocus)
+    }
+
+    @Test
+    fun resettingACatalogRestoresTheChosenHeaderAndIgnoresAutomaticFocus() {
+        val state = TvListState()
+        state.restorationComplete()
+        state.focusHeader(TvHeaderFocus.Menu)
+        val request = state.headerRequest
+        state.reset()
+        state.focusHeader(TvHeaderFocus.Search)
+        assertEquals(TvHeaderFocus.Menu, state.headerFocus)
+        assertTrue(state.restoring)
+        assertEquals(request + 1, state.headerRequest)
+    }
+
+    @Test
     fun onlyHighFrequencyHeldKeysAreLimited() {
         val state = TvListState()
         assertTrue(state.acceptDirectionKey(repeatCount = 0, eventTimeMs = 1000))
@@ -174,6 +203,21 @@ class TvListStateTest {
         // 快速松开再按和改按反方向都立即响应。
         assertTrue(state.acceptDirectionKey(repeatCount = 0, eventTimeMs = 1130))
         assertTrue(state.acceptDirectionKey(repeatCount = 0, eventTimeMs = 1140))
+    }
+
+    @Test
+    fun heldKeysReduceFocusMotionUntilReleasedOrLeavingThePage() {
+        val state = TvListState()
+        state.acceptDirectionKey(repeatCount = 0, eventTimeMs = 1000)
+        assertFalse(state.directionHeld)
+        state.acceptDirectionKey(repeatCount = 1, eventTimeMs = 1040)
+        // 即使本次连发被限流，也应进入轻微放大状态。
+        assertTrue(state.directionHeld)
+        state.releaseDirectionKey()
+        assertFalse(state.directionHeld)
+        state.acceptDirectionKey(repeatCount = 2, eventTimeMs = 1200)
+        state.pauseTracking()
+        assertFalse(state.directionHeld)
     }
 
     @Test

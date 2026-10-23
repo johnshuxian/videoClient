@@ -1,13 +1,17 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { spawn } = require("node:child_process");
+const { createServer: createHttpServer } = require("node:http");
 const path = require("node:path");
+const { proxyStream } = require("./stream-proxy.cjs");
 
 // 用真实 Electron、React 和 ArtPlayer 验证卸载后的媒体状态，覆盖库内的延迟任务。
 if (process.versions.electron) {
   const { app, BrowserWindow } = require("electron");
   app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
   app.commandLine.appendSwitch("mute-audio");
+  // 全部测试服务都在本机，避免系统代理探测影响请求耗时和重试次数。
+  app.commandLine.appendSwitch("no-proxy-server");
   app.whenReady().then(async () => {
     const window = new BrowserWindow({
       show: false,
@@ -34,8 +38,18 @@ if (process.versions.electron) {
     }
   });
 } else {
-  test("播放页退出和切换视频后，旧播放器不能恢复播放", { timeout: 30000 }, async (t) => {
+  test("播放器生命周期与 HLS 清单失败恢复", { timeout: 90000 }, async (t) => {
     const { createServer } = await import("vite");
+    const requests = {};
+    let proxyOrigin;
+    // 使用生产代理和另一个端口，确保浏览器确实经过跨域错误处理。
+    const proxy = createHttpServer((req, res) => {
+      const target = new URL(req.url, "http://localhost").searchParams.get("url");
+      void proxyStream(req, res, {
+        target, requestHeaders: {}, filterAds: false,
+        proxyUrl: url => proxyOrigin + "/stream?url=" + encodeURIComponent(url),
+      });
+    });
     const server = await createServer({
       configFile: false,
       root: path.join(__dirname, ".."),
@@ -48,6 +62,22 @@ if (process.versions.electron) {
         },
         configureServer(server) {
           server.middlewares.use(async (req, res, next) => {
+            if (req.url === "/request-counts") {
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify(requests));
+              return;
+            }
+            if (req.url?.startsWith("/manifest/")) {
+              const name = req.url.split("/").at(-1).replace(".m3u8", "");
+              const attempt = requests[name] = (requests[name] || 0) + 1;
+              if (name === "timeout" && attempt === 1) return;
+              const status = name === "forbidden" ? 403 : name === "missing" ? 404
+                : name === "unavailable" || name === "cancel" || name === "flaky" && attempt < 3 ? 503 : 200;
+              res.writeHead(status, { "Content-Type": "application/vnd.apple.mpegurl" });
+              res.end(status !== 200 ? "source unavailable" : name === "invalid" ? "<html>not a playlist</html>"
+                : "#EXTM3U\n#EXT-X-TARGETDURATION:15\n#EXTINF:15,\n/test.wav\n#EXT-X-ENDLIST");
+              return;
+            }
             if (req.url === "/test.m3u8") {
               res.writeHead(200, { "Content-Type": "application/vnd.apple.mpegurl" });
               res.end("#EXTM3U\n#EXT-X-TARGETDURATION:15\n#EXTINF:15,\n/test.wav\n#EXT-X-ENDLIST");
@@ -81,19 +111,30 @@ if (process.versions.electron) {
                 import { createElement, StrictMode } from "react";
                 import { createRoot } from "react-dom/client";
                 import Artplayer from "artplayer";
+                import Hls from "hls.js";
                 import { Player } from "/src/App.tsx";
 
+                const proxyOrigin = ${JSON.stringify(proxyOrigin)};
+                const parsedManifests = new Set();
+                const originalLoadSource = Hls.prototype.loadSource;
+                Hls.prototype.loadSource = function(url) {
+                  this.on(Hls.Events.MANIFEST_PARSED, () => parsedManifests.add(url));
+                  originalLoadSource.call(this, url);
+                };
                 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
-                async function until(check) {
-                  for (let i = 0; i < 500; i++) {
-                    if (check()) return;
+                async function until(check, description = "播放器状态") {
+                  for (let i = 0; i < 3000; i++) {
+                    if (await check()) return;
                     await wait(10);
                   }
-                  throw new Error("等待播放器状态超时");
+                  throw new Error("等待" + description + "超时：" + (document.querySelector(".video-error")?.textContent || ""));
                 }
                 window.videoAPI = {
                   platform: "win32",
-                  streamUrl: async url => ({ url, isHls: url.endsWith(".m3u8") }),
+                  streamUrl: async url => ({
+                    url: url.includes("/manifest/") ? proxyOrigin + "/stream?url=" + encodeURIComponent(url) : url,
+                    isHls: url.endsWith(".m3u8"),
+                  }),
                 };
                 const playerInstance = { current: null };
                 const props = {
@@ -117,8 +158,61 @@ if (process.versions.electron) {
                 }
                 window.playerTest = { async run() {
                   const results = [];
+                  // 先确认跨域代理可达，避免首次建立连接的耗时占用故障注入的重试预算。
+                  const probe = proxyOrigin + "/stream?url=" + encodeURIComponent(location.origin + "/test.m3u8");
+                  const response = await fetch(probe);
+                  if (!response.ok || !(await response.text()).startsWith("#EXTM3U"))
+                    throw new Error("跨域测试代理未就绪");
                   const firstUrl = location.origin + "/test.wav?first";
                   const secondUrl = location.origin + "/test.wav?second";
+                  let failures = 0;
+                  props.onFailure = () => { failures++; return false; };
+                  for (const name of ["flaky", "timeout"]) {
+                    failures = 0;
+                    const url = location.origin + "/manifest/" + name + ".m3u8";
+                    const proxied = proxyOrigin + "/stream?url=" + encodeURIComponent(url);
+                    await mount(url, false);
+                    await until(() => parsedManifests.has(proxied), name + " 清单恢复");
+                    root.unmount();
+                    const counts = await fetch("/request-counts").then(res => res.json());
+                    results.push({
+                      name: name === "flaky" ? "清单连续两次 503 后恢复" : "清单首次超时后恢复",
+                      recovered: counts[name] === (name === "flaky" ? 3 : 2),
+                      noPrematureFailure: failures === 0,
+                    });
+                  }
+                  for (const [name, status, hint] of [
+                    ["forbidden", 403, "拒绝访问"], ["missing", 404, "已失效"],
+                    ["unavailable", 503, "请求失败"], ["invalid", 200, "格式无效"],
+                  ]) {
+                    failures = 0;
+                    await mount(location.origin + "/manifest/" + name + ".m3u8", false);
+                    await until(() => document.querySelector(".video-error"), name + " 错误提示");
+                    const message = document.querySelector(".video-error").textContent;
+                    const counts = await fetch("/request-counts").then(res => res.json());
+                    results.push({
+                      name: "清单最终失败：" + name,
+                      boundedRetries: counts[name] === (status === 503 ? 3 : 1),
+                      oneFailure: failures === 1,
+                      readableMessage: message.includes(hint) && (status === 200 || message.includes("HTTP " + status)),
+                    });
+                    root.unmount();
+                  }
+                  failures = 0;
+                  await mount(location.origin + "/manifest/cancel.m3u8", false);
+                  await until(async () => {
+                    const counts = await fetch("/request-counts").then(res => res.json());
+                    return counts.cancel === 1;
+                  });
+                  root.unmount();
+                  await wait(1300);
+                  const counts = await fetch("/request-counts").then(res => res.json());
+                  results.push({
+                    name: "退出后取消清单重试",
+                    noRetry: counts.cancel === 1,
+                    noFailure: failures === 0,
+                    active: Artplayer.instances.length === 0,
+                  });
                   const first = await mount(firstUrl);
                   // 在错误重连等待期间退出，然后立即播放另一部视频。
                   first.video.dispatchEvent(new Event("error"));
@@ -186,8 +280,11 @@ if (process.versions.electron) {
     let child;
     t.after(async () => {
       if (child?.exitCode === null) child.kill();
+      await new Promise(resolve => proxy.close(resolve));
       await server.close();
     });
+    await new Promise(resolve => proxy.listen(0, "127.0.0.1", resolve));
+    proxyOrigin = `http://127.0.0.1:${proxy.address().port}`;
     await server.listen();
     const url = `http://127.0.0.1:${server.httpServer.address().port}/player-test`;
     const result = await new Promise((resolve, reject) => {
@@ -203,7 +300,7 @@ if (process.versions.electron) {
       child.on("error", reject);
       child.on("exit", code => {
         const match = stdout.match(/PLAYER_TEST_RESULT=(.+)/);
-        if (code !== 0 || !match) reject(new Error(stderr || stdout || `Electron exit ${code}`));
+        if (code !== 0 || !match) reject(new Error((stderr || stdout || `Electron exit ${code}`) + "\n清单请求次数：" + JSON.stringify(requests)));
         else resolve(JSON.parse(match[1]));
       });
     });

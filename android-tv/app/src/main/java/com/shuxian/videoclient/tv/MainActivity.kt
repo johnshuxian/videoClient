@@ -190,6 +190,8 @@ private fun TvApp(onExit: () -> Unit) {
 
     fun chooseSection(next: String) {
         if (section == next) return
+        // 播放记录和海报使用不同列表，先屏蔽旧页头销毁时产生的自动焦点。
+        browseList.pauseTracking()
         section = next
         tag = "热门"
         categoryId = null
@@ -761,8 +763,12 @@ private fun TvApp(onExit: () -> Unit) {
                 categoryError = categoryError,
                 history = history,
                 onSection = { chooseSection(it) },
-                onTag = { tag = it },
-                onCategory = { categoryId = it },
+                onTag = {
+                    if (tag != it) { browseList.pauseTracking(); tag = it }
+                },
+                onCategory = {
+                    if (categoryId != it) { browseList.pauseTracking(); categoryId = it }
+                },
                 onSearch = { searchList.backToTop(TvHeaderFocus.Search); screen = "search" },
                 onSettings = { settingsReturnScreen = screen; screen = "settings" },
                 onRetryCategories = { reload++ },

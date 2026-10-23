@@ -38,6 +38,8 @@ internal class TvListState(initialHeader: TvHeaderFocus = TvHeaderFocus.Menu) {
     var headerRequest by mutableIntStateOf(0)
         private set
     private var lastDirectionTimeMs = 0L
+    var directionHeld by mutableStateOf(false)
+        private set
 
     fun focusPoster(index: Int, delete: Boolean = false) {
         // 新按键更新同一个目标，滚动任务跟随最新位置，不积压动画，也不丢弃后续移动。
@@ -49,11 +51,14 @@ internal class TvListState(initialHeader: TvHeaderFocus = TvHeaderFocus.Menu) {
         tvPosterTarget(pendingIndex ?: index, count, direction, columns)
 
     fun acceptDirectionKey(repeatCount: Int, eventTimeMs: Long): Boolean {
+        directionHeld = repeatCount > 0
         // 只限制系统长按连发；每次重新按下都立即响应，避免目标尚未布局时一次跨过太多排。
         if (repeatCount > 0 && eventTimeMs - lastDirectionTimeMs < 100L) return false
         lastDirectionTimeMs = eventTimeMs
         return true
     }
+
+    fun releaseDirectionKey() { directionHeld = false }
 
     fun focusCompleted() { pendingIndex = null }
 
@@ -62,12 +67,14 @@ internal class TvListState(initialHeader: TvHeaderFocus = TvHeaderFocus.Menu) {
         focusPoster(keys.indexOf(lastPosterKey).coerceAtLeast(0))
     }
 
-    fun focusHeader(target: TvHeaderFocus) {
-        if (restoring) return
+    fun focusHeader(target: TvHeaderFocus): Boolean {
+        // 下移过程中旧行可能先被回收，系统临时交给页头的焦点不能取消目标行。
+        // 主动上移仍通过 showHeader 清理 pendingIndex，再恢复指定的页头入口。
+        if (restoring || pendingIndex != null) return false
         focusedKey = null
         deleteFocused = false
         headerFocus = target
-        focusCompleted()
+        return true
     }
 
     fun posterFocused(key: String, delete: Boolean = false) {
@@ -94,6 +101,7 @@ internal class TvListState(initialHeader: TvHeaderFocus = TvHeaderFocus.Menu) {
     fun pauseTracking() {
         // 页面重建和弹窗关闭可能先产生自动焦点，恢复完成前不记录这些临时位置。
         restoring = true
+        releaseDirectionKey()
         focusCompleted()
     }
 
@@ -117,11 +125,12 @@ internal class TvListState(initialHeader: TvHeaderFocus = TvHeaderFocus.Menu) {
         deleteFocused = false
         focusCompleted()
         grid.requestScrollToItem(0)
+        // 切换栏目/分类会改变甚至重建页头，布局完成后恢复原来选中的入口。
+        restoreFocus()
     }
 
     fun backToTop(target: TvHeaderFocus = TvHeaderFocus.Filters) {
-        reset()
         headerFocus = target
-        restoreFocus()
+        reset()
     }
 }

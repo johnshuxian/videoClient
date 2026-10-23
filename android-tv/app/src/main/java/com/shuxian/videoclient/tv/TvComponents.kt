@@ -362,18 +362,14 @@ internal fun Poster(
 
 @Composable
 internal fun PosterCard(title: String, poster: String, subtitle: String, repository: VodRepository, modifier: Modifier = Modifier,
-    targetWidth: Int = 320, visible: Boolean = true, onFocus: () -> Unit = {}, onClick: () -> Unit) {
+    targetWidth: Int = 320, visible: Boolean = true, movingQuickly: Boolean = false, onFocus: () -> Unit = {}, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(10.dp)
     // 焦点区域放在缩放层外，避免列表按放大后的边界反复调整滚动位置。
     val focusProgress = animateFloatAsState(
-        targetValue = if (focused) 1f else 0f,
-        animationSpec = tween(300, easing = CubicBezierEasing(.165f, .84f, .44f, 1f)),
-    )
-    // 动画值只在绘制层读取，放大与淡入期间无需逐帧重组卡片和文字。
-    val imageScale = animateFloatAsState(
-        targetValue = if (focused) 1.1f else 1f,
-        animationSpec = tween(800, easing = CubicBezierEasing(.165f, .84f, .44f, 1f)),
+        // 长按经过的卡片只轻微放大；松开后，最终停留的卡片再完成放大。
+        targetValue = if (focused) { if (movingQuickly) .4f else 1f } else 0f,
+        animationSpec = tween(160, easing = CubicBezierEasing(.165f, .84f, .44f, 1f)),
     )
     Column(
         modifier.fillMaxWidth().onFocusChanged {
@@ -389,7 +385,8 @@ internal fun PosterCard(title: String, poster: String, subtitle: String, reposit
             .padding(7.dp),
     ) {
         Poster(poster, repository, Modifier.fillMaxWidth().aspectRatio(.72f), showLoading = true,
-            imageScale = { imageScale.value }, targetWidth = targetWidth, animateLoading = visible)
+            // 卡片和图片共用 160ms 进度，只在绘制层读取，避免两套动画先后停下。
+            imageScale = { 1f + .04f * focusProgress.value }, targetWidth = targetWidth, animateLoading = visible)
         Spacer(Modifier.height(10.dp))
         BasicText(title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = TextStyle(color = if (focused) accent else white, fontSize = 17.sp, fontWeight = FontWeight.SemiBold))
         BasicText(subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis, style = TextStyle(color = muted, fontSize = 13.sp), modifier = Modifier.padding(top = 3.dp))

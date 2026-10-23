@@ -1,13 +1,11 @@
 package com.shuxian.videoclient.tv
 
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
-import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -69,7 +67,7 @@ import kotlinx.coroutines.launch
 
 private val movieTags = listOf("热门", "最新", "经典", "可播放", "豆瓣高分", "冷门佳片", "华语", "欧美", "韩国", "日本", "动作", "喜剧", "爱情", "科幻", "悬疑", "恐怖", "成长", "动画")
 private val tvTags = listOf("热门", "最新", "国产剧", "港剧", "美剧", "英剧", "日剧", "韩剧", "日本动画", "综艺", "纪录片")
-private val sections = listOf("movie" to "电影", "tv" to "电视", "variety" to "综艺", "custom" to "自定义", "history" to "播放记录")
+private val sections = listOf("history" to "播放记录", "movie" to "电影", "tv" to "电视", "variety" to "综艺", "custom" to "自定义")
 
 @Composable
 internal fun TvBrowseScreen(
@@ -136,8 +134,9 @@ internal fun TvBrowseScreen(
                 TvHeaderFocus.ClearHistory -> if (section == "history" && history.isNotEmpty()) clearHistoryFocus else activeMenu
                 else -> activeMenu
             }
-            state.restorationComplete()
             target.requestFocus()
+            // 请求焦点也会触发菜单/分类回调，恢复完成前不让回调再次切换内容。
+            state.restorationComplete()
         }
     }
 
@@ -182,7 +181,7 @@ internal fun TvBrowseScreen(
                                 } else false
                             },
                         onFocus = {
-                            if (!state.restoring) { state.focusHeader(TvHeaderFocus.Menu); onSection(value) }
+                            if (state.focusHeader(TvHeaderFocus.Menu)) onSection(value)
                         }, onClick = { onSection(value) })
                 }
             }
@@ -196,7 +195,7 @@ internal fun TvBrowseScreen(
             if (hasTags) key(section) {
                 val tags = if (section == "movie") movieTags else tvTags
                 TvFilterRow(tags.map { it to it }, tag, tagFocus, activeMenu, onDown = { enterContent() }) {
-                    if (!state.restoring) { state.focusHeader(TvHeaderFocus.Filters); onTag(it) }
+                    if (state.focusHeader(TvHeaderFocus.Filters)) onTag(it)
                 }
             }
             if (hasCategories) {
@@ -209,8 +208,7 @@ internal fun TvBrowseScreen(
                             else -> enterContent()
                         }
                     }) { selected ->
-                    if (!state.restoring) {
-                        state.focusHeader(TvHeaderFocus.ParentFilter)
+                    if (state.focusHeader(TvHeaderFocus.ParentFilter)) {
                         val id = selected.toIntOrNull()
                         if (id != parentId) onCategory(categories.firstOrNull { it.parentId == id }?.id ?: id)
                     }
@@ -218,7 +216,7 @@ internal fun TvBrowseScreen(
                 if (children.isNotEmpty()) key(parentId) {
                     TvFilterRow(children.map { it.id.toString() to it.name }, categoryId.toString(), childFocus, parentFocus,
                         onDown = { if (categoryFailed) categoryRetryFocus.requestFocus() else enterContent() }) {
-                        if (!state.restoring) { state.focusHeader(TvHeaderFocus.ChildFilter); onCategory(it.toInt()) }
+                        if (state.focusHeader(TvHeaderFocus.ChildFilter)) onCategory(it.toInt())
                     }
                 }
             }
@@ -302,8 +300,8 @@ internal fun TvSearchScreen(
                 TvHeaderFocus.SearchSubmit -> submitFocus
                 else -> inputFocus
             }
-            state.restorationComplete()
             target.requestFocus()
+            state.restorationComplete()
         }
     }
     val header: @Composable () -> Unit = {
@@ -370,7 +368,7 @@ private fun rememberTvListBringIntoViewSpec(state: TvListState): BringIntoViewSp
     }
 }
 
-// 目标进入懒布局后便聚焦，80ms 滚动过渡只负责将卡片完整带入视口。
+// 目标进入懒布局后便聚焦；滚动独立追随目标，连续移动沿用同一份动画状态。
 @Composable
 private fun RestoreListFocus(
     state: TvListState,
@@ -381,6 +379,7 @@ private fun RestoreListFocus(
     columns: Int = TV_POSTER_COLUMNS,
     onMissing: () -> Unit,
 ) {
+    val scroll = remember(state) { TvFocusScrollState() }
     LaunchedEffect(state, state.headerRequest, state.revision) {
         if (state.focusedKey != null) {
             val index = keys.indexOf(state.focusedKey)
@@ -393,12 +392,13 @@ private fun RestoreListFocus(
         }
     }
     LaunchedEffect(state, state.pendingIndex, state.pendingDelete, keys, waitForItems) {
-        val index = state.pendingIndex ?: return@LaunchedEffect
+        val index = state.pendingIndex ?: run { scroll.reset(); return@LaunchedEffect }
         var scrollJob: Job? = null
         val target = keys.getOrNull(index)
         if (target != null) {
             val layout = state.grid.layoutInfo
             if (state.restoring) {
+                scroll.reset()
                 // 返回页面时沿用原来的滚动位置，仅在目标尚未布局时直接定位。
                 if (layout.visibleItemsInfo.none { it.key == target }) state.grid.scrollToItem(index + 1)
             } else {
@@ -412,10 +412,9 @@ private fun RestoreListFocus(
                         layout.viewportStartOffset + layout.beforeContentPadding,
                         layout.viewportEndOffset - layout.afterContentPadding)
                     // 只补足越过屏幕边缘的距离，保留上一排作为视觉参照，不再把下一排强行拉到顶部。
-                    if (distance != 0) scrollJob = launch {
-                        state.grid.animateScrollBy(distance.toFloat(), tween(80))
-                    }
+                    scrollJob = launch { scroll.animateBy(state.grid, distance.toFloat()) }
                 } else {
+                    scroll.reset()
                     // 长页头占满屏幕时还没有卡片尺寸，直接进入内容区并把目标放在视口中部。
                     state.grid.scrollToItem(index + 1, scrollOffset = -layout.viewportSize.height / 2)
                 }
@@ -514,6 +513,7 @@ private fun TvPosterGrid(
                                 else -> null
                             }
                             if (direction == null) false else {
+                                if (event.type == KeyEventType.KeyUp) state.releaseDirectionKey()
                                 if (event.type == KeyEventType.KeyDown &&
                                     state.acceptDirectionKey(event.nativeKeyEvent.repeatCount, event.nativeKeyEvent.eventTime)) {
                                     val fromIndex = state.pendingIndex ?: index
@@ -530,7 +530,7 @@ private fun TvPosterGrid(
                                 }
                                 true
                             }
-                        }, targetWidth = posterWidth, visible = item.key in visibleKeys,
+                        }, targetWidth = posterWidth, visible = item.key in visibleKeys, movingQuickly = state.directionHeld,
                         onFocus = { state.posterFocused(item.key) }, onClick = { state.leaveFromPoster(item.key); onOpen(item) })
                 }
                 if (loading) item(key = "loading", span = { GridItemSpan(maxLineSpan) }, contentType = "status") {
@@ -609,6 +609,7 @@ private fun TvHistoryList(
                 Row(Modifier.fillMaxWidth().onPreviewKeyEvent { event ->
                     if (event.key == Key.DirectionUp || event.key == Key.DirectionDown ||
                         event.key == Key.DirectionLeft || event.key == Key.DirectionRight) {
+                        if (event.type == KeyEventType.KeyUp) state.releaseDirectionKey()
                         if (event.type == KeyEventType.KeyDown &&
                             state.acceptDirectionKey(event.nativeKeyEvent.repeatCount, event.nativeKeyEvent.eventTime)) {
                             val fromIndex = state.pendingIndex ?: index

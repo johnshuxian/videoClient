@@ -597,6 +597,7 @@ function Player({
       failed = true;
       source.shouldPlay = false;
       clearTimers();
+      hlsRef.current?.stopLoad();
       // 新线路尚未加载时，旧视频的结束时间不能当成新线路的续播位置。
       const position = sourceRef.current?.loaded
         ? artRef.current?.currentTime || resume
@@ -673,14 +674,50 @@ function Player({
                   maxBufferLength:
                     window.videoAPI.platform === "android" ? 20 : 40,
                   enableWorker: true,
+                  // 临时请求错误间隔 1/2 秒重试；保留库的超时设置和页面的 30 秒加载期限。
+                  manifestLoadPolicy: {
+                    default: {
+                      ...Hls.DefaultConfig.manifestLoadPolicy.default,
+                      errorRetry: {
+                        maxNumRetry: 2,
+                        retryDelayMs: 1000,
+                        maxRetryDelayMs: 2000,
+                      },
+                    },
+                  },
                 });
                 hlsRef.current = hls;
+                hls.on(Hls.Events.ERROR, (_, data) => {
+                  if (
+                    !data.fatal ||
+                    sourceRef.current !== current ||
+                    hlsRef.current !== hls
+                  )
+                    return;
+                  const status = data.response?.code;
+                  let message = `视频加载失败：${data.details}`;
+                  if (data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR) {
+                    if (status === 401 || status === 403)
+                      message = `源站拒绝访问视频清单（HTTP ${status}），请切换线路。`;
+                    else if (status === 404 || status === 410)
+                      message = `视频清单地址已失效（HTTP ${status}），请切换线路。`;
+                    else if (status)
+                      message = `视频清单请求失败（HTTP ${status}），请稍后重试或切换线路。`;
+                    else
+                      message = "视频清单请求失败，请检查网络或切换线路。";
+                  } else if (
+                    data.details === Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT
+                  ) {
+                    message = "视频清单加载超时，请稍后重试或切换线路。";
+                  } else if (
+                    data.details === Hls.ErrorDetails.MANIFEST_PARSING_ERROR
+                  ) {
+                    message = "源站返回的播放清单格式无效，请切换线路。";
+                  }
+                  current.fail(message);
+                });
                 hls.loadSource(source);
                 hls.attachMedia(video);
-                hls.on(Hls.Events.ERROR, (_, data) => {
-                  if (data.fatal && sourceRef.current === current)
-                    current.fail(`视频加载失败：${data.details}`);
-                });
               } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
                 video.src = source;
               } else {

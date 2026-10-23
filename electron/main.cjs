@@ -4,14 +4,9 @@ const http = require("node:http");
 const dgram = require("node:dgram");
 const os = require("node:os");
 const crypto = require("node:crypto");
-const { Readable } = require("node:stream");
-const { pipeline } = require("node:stream/promises");
 const { setTimeout: delay } = require("node:timers/promises");
-const {
-  parseEpisodes,
-  rewriteManifest,
-  videoUrlFromSharePage,
-} = require("./media.cjs");
+const { parseEpisodes, videoUrlFromSharePage } = require("./media.cjs");
+const { proxyStream } = require("./stream-proxy.cjs");
 const { createSettingsStore } = require("./settings.cjs");
 const { discoverDlnaOnInterfaces } = require("./dlna-discovery.cjs");
 
@@ -181,68 +176,14 @@ const proxyServer = http.createServer(async (req, res) => {
     }
     return;
   }
-  const controller = new AbortController();
-  const headerTimer = setTimeout(() => controller.abort(), 20000);
-  res.on("close", () => controller.abort());
-  try {
-    const headers = {};
-    if (req.headers.range) headers.Range = req.headers.range;
-    const targetUrl = new URL(target);
-    // 豆瓣海报要求豆瓣页面 Referer；视频与资源站图片通常要求各自站点的 Referer。
-    headers.Referer = /(?:^|\.)doubanio\.com$/i.test(targetUrl.hostname)
-      ? "https://movie.douban.com/"
-      : `${targetUrl.origin}/`;
-    // 只限制建立连接的时间；长视频流在收到响应头后不应被定时器中途截断。
-    const upstream = await fetch(target, {
-      headers: { ...requestHeaders, ...headers },
-      signal: controller.signal,
-    });
-    clearTimeout(headerTimer);
-    if (!upstream.ok) throw new Error(`HTTP ${upstream.status}`);
-    const type = upstream.headers.get("content-type") || "";
-    const manifest =
-      /\.m3u8(?:$|[?#])/i.test(upstream.url) || /mpegurl/i.test(type);
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Cache-Control", "no-store");
-    if (manifest) {
-      const body = await upstream.text();
-      res.setHeader(
-        "Content-Type",
-        "application/vnd.apple.mpegurl; charset=utf-8",
-      );
-      res.end(
-        rewriteManifest(
-          body,
-          upstream.url,
-          (nested) =>
-            proxyUrl(
-              nested,
-              requestUrl.searchParams.get("ads") === "1",
-              req.headers.host?.split(":")[0] || "127.0.0.1",
-            ),
-          requestUrl.searchParams.get("ads") === "1",
-        ),
-      );
-      return;
-    }
-    for (const key of [
-      "content-type",
-      "content-length",
-      "content-range",
-      "accept-ranges",
-    ]) {
-      const value = upstream.headers.get(key);
-      if (value) res.setHeader(key, value);
-    }
-    res.writeHead(upstream.status);
-    await pipeline(Readable.fromWeb(upstream.body), res);
-  } catch (error) {
-    clearTimeout(headerTimer);
-    if (res.destroyed) return;
-    if (!res.headersSent)
-      res.writeHead(502).end(`上游视频请求失败：${error.message}`);
-    else res.destroy(error);
-  }
+  const filterAds = requestUrl.searchParams.get("ads") === "1";
+  await proxyStream(req, res, {
+    target,
+    requestHeaders,
+    filterAds,
+    proxyUrl: (nested) =>
+      proxyUrl(nested, filterAds, req.headers.host?.split(":")[0] || "127.0.0.1"),
+  });
 });
 
 function createWindow() {
