@@ -16,8 +16,6 @@ __pycache__/
 *.cer
 # 本地安卓正式签名密码，不提交到仓库。
 /signing-password.txt
-# 找回签名时生成的本机私钥和解密结果，不提交到仓库。
-/android-signing-recovery/
 /harmony-signing/
 .DS_Store
 .playwright-cli/

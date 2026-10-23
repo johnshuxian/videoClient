@@ -536,6 +536,7 @@ function Player({
     clearTimers: () => void;
     watchStall: () => void;
     resume: number;
+    streamUrl: string | null;
     loaded: boolean;
     shouldPlay: boolean;
   } | null>(null);
@@ -561,14 +562,21 @@ function Player({
   useEffect(() => {
     return () => {
       sourceRef.current?.clearTimers();
+      sourceRef.current = null;
       stopTouchGesturesRef.current?.();
-      hlsRef.current?.destroy();
       const art = artRef.current;
+      // 先使延迟的 HLS 回调失效，再释放媒体，防止卸载后重新创建取流实例。
+      artRef.current = null;
+      if (art) {
+        art.video.autoplay = false;
+        art.video.pause();
+      }
+      hlsRef.current?.destroy();
+      hlsRef.current = null;
       // 网页全屏会把播放器节点移到 body，销毁前先放回原容器。
       if (art?.fullscreenWeb) art.fullscreenWeb = false;
       if (playerInstance.current === art) playerInstance.current = null;
-      art?.destroy(false);
-      artRef.current = null;
+      art?.destroy();
       fullscreenTitleRef.current = null;
     };
   }, [playerInstance]);
@@ -579,8 +587,6 @@ function Player({
     let startupTimeout: number | undefined;
     let stallTimeout: number | undefined;
     setError("");
-    // 切集只更换视频源，保留 ArtPlayer 的 DOM 与全屏状态。
-    artRef.current?.video.pause();
     const clearTimers = () => {
       window.clearTimeout(startupTimeout);
       window.clearTimeout(stallTimeout);
@@ -589,6 +595,7 @@ function Player({
     const failPlayback = (message: string) => {
       if (cancelled || failed) return;
       failed = true;
+      source.shouldPlay = false;
       clearTimers();
       // 新线路尚未加载时，旧视频的结束时间不能当成新线路的续播位置。
       const position = sourceRef.current?.loaded
@@ -610,6 +617,7 @@ function Player({
       clearTimers,
       watchStall,
       resume,
+      streamUrl: null as string | null,
       loaded: false,
       shouldPlay: true,
     };
@@ -622,12 +630,16 @@ function Player({
     window.videoAPI
       .streamUrl(url, filterAds)
       .then(async (stream) => {
+        if (cancelled || failed) return;
         // 播放器与 HLS 库按需加载，切集时沿用已经创建的播放器。
         const [{ default: Artplayer }, hlsModule] = await Promise.all([
           import("artplayer"),
           stream.isHls ? import("hls.js") : Promise.resolve(null),
         ]);
-        if (cancelled) return;
+        if (cancelled || failed) return;
+        source.streamUrl = stream.url;
+        // 失败线路由本组件处理；库内延迟重连不会随 destroy 取消，会复活旧视频。
+        Artplayer.RECONNECT_TIME_MAX = 0;
         hlsTypeRef.current = hlsModule?.default || null;
         hlsRef.current?.destroy();
         hlsRef.current = null;
@@ -645,19 +657,29 @@ function Player({
           // 代理地址以 /stream 结尾，ArtPlayer 无法从后缀识别 HLS。
           ...(stream.isHls ? { type: "m3u8" as const } : {}),
           customType: {
-            m3u8(video, source) {
+            m3u8(video, source, instance) {
+              const current = sourceRef.current;
+              // ArtPlayer 会延迟调用 customType，退出或切源后旧任务不能再挂载 HLS。
+              if (
+                instance.isDestroy ||
+                artRef.current !== instance ||
+                !current ||
+                current.streamUrl !== source
+              )
+                return;
               const Hls = hlsTypeRef.current;
               if (Hls?.isSupported()) {
-                hlsRef.current = new Hls({
+                const hls = new Hls({
                   maxBufferLength:
                     window.videoAPI.platform === "android" ? 20 : 40,
                   enableWorker: true,
                 });
-                hlsRef.current.loadSource(source);
-                hlsRef.current.attachMedia(video);
-                hlsRef.current.on(Hls.Events.ERROR, (_, data) => {
-                  if (data.fatal)
-                    sourceRef.current?.fail(`视频加载失败：${data.details}`);
+                hlsRef.current = hls;
+                hls.loadSource(source);
+                hls.attachMedia(video);
+                hls.on(Hls.Events.ERROR, (_, data) => {
+                  if (data.fatal && sourceRef.current === current)
+                    current.fail(`视频加载失败：${data.details}`);
                 });
               } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
                 video.src = source;
@@ -668,7 +690,8 @@ function Player({
           },
           lang: "zh-cn",
           theme: "#d6bb8a",
-          autoplay: true,
+          // 仅由当前源的 canplay 回调启动播放，避免旧地址重新挂载时原生自动播放。
+          autoplay: false,
           playsInline: true,
           // 左右滑动由本地手势处理并带死区，避免 ArtPlayer 默认无阈值 seek。
           gesture: window.videoAPI.platform !== "android",
@@ -736,8 +759,9 @@ function Player({
         }
         art.on("video:loadedmetadata", () => {
           const current = sourceRef.current;
-          if (current) current.loaded = true;
-          const position = current?.resume || 0;
+          if (!current) return;
+          current.loaded = true;
+          const position = current.resume;
           if (position > 5 && position < art.duration - 15)
             art.currentTime = position;
         });
@@ -754,7 +778,8 @@ function Player({
           }
         });
         art.on("video:playing", () => {
-          sourceRef.current?.clearTimers();
+          if (!sourceRef.current) return;
+          sourceRef.current.clearTimers();
           onPlayingRef.current();
         });
         // 播放途中若一直转圈且没有触发 error，也继续尝试右侧的其他线路。
@@ -763,7 +788,9 @@ function Player({
         art.on("video:pause", () => {
           sourceRef.current?.clearTimers();
         });
-        art.on("video:ended", () => onEndedRef.current());
+        art.on("video:ended", () => {
+          if (sourceRef.current?.loaded) onEndedRef.current();
+        });
         art.on("video:error", () => {
           const code = art?.video.error?.code;
           const message =
@@ -784,6 +811,12 @@ function Player({
       cancelled = true;
       clearTimers();
       if (sourceRef.current === source) sourceRef.current = null;
+      // 切集等待新地址期间也立即释放旧流，保留播放器 DOM 与全屏状态。
+      hlsRef.current?.destroy();
+      hlsRef.current = null;
+      const art = artRef.current;
+      art?.video.pause();
+      art?.reset();
     };
   }, [url, filterAds, playbackSerial]);
 
@@ -877,7 +910,6 @@ export default function App() {
         item.title.toLocaleLowerCase().includes(searchKeyword.toLocaleLowerCase()),
       )
     : results;
-  const [failed, setFailed] = useState<string[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchProgress, setSearchProgress] = useState(0);
   const [selected, setSelected] = useState<SearchItem | null>(null);
@@ -1444,7 +1476,6 @@ export default function App() {
     setSearchLoading(true);
     setSearchProgress(0);
     setResults([]);
-    setFailed([]);
     if (searchableSources.length === 0) {
       setSearchLoading(false);
       return;
@@ -1454,7 +1485,7 @@ export default function App() {
         term,
         searchableSources,
         serial,
-        (completed, total, items, failedSource) => {
+        (completed, total, items) => {
           if (serial !== searchSerial.current) return;
           setSearchProgress(Math.round((completed / total) * 100));
           if (items.length > 0)
@@ -1472,21 +1503,14 @@ export default function App() {
                 }),
               ];
             });
-          if (failedSource)
-            setFailed((previous) =>
-              previous.includes(failedSource)
-                ? previous
-                : [...previous, failedSource],
-            );
         },
       );
       if (serial === searchSerial.current) {
         setResults(data.results);
-        setFailed(data.failed);
       }
     } catch (error) {
       if (serial === searchSerial.current)
-        setFailed([(error as Error).message]);
+        console.error("搜索失败", error);
     } finally {
       if (serial === searchSerial.current) setSearchLoading(false);
     }
@@ -2669,15 +2693,7 @@ export default function App() {
                 )}
                 <div className="section-heading">
                   <div>
-                    <span className="section-kicker">SEARCH RESULTS</span>
-                    <h2>
-                      “{searched}” 的搜索结果{" "}
-                      <span>
-                        {searchLoading
-                          ? `已找到 ${visibleResults.length} 条 · 搜索中...`
-                          : `共 ${visibleResults.length} 条`}
-                      </span>
-                    </h2>
+                    <h2>“{searched}” 的搜索结果</h2>
                   </div>
                   {window.videoAPI.platform === "android" && (
                     <button
@@ -2695,17 +2711,6 @@ export default function App() {
                     </button>
                   )}
                 </div>
-                <p className="search-subtitle">
-                  来自 {searchableSources.length} 个可搜索点播源 ·
-                  点击资源查看线路与选集
-                </p>
-                {failed.length > 0 && (
-                  <div className="notice">
-                    {failed.length} 个源暂时无响应：
-                    {failed.slice(0, 6).join("、")}
-                    {failed.length > 6 ? "…" : ""}
-                  </div>
-                )}
                 {searchLoading && visibleResults.length === 0 && (
                   <div className="search-wait" role="status" aria-live="polite">
                     <div className="search-wait-card">
@@ -2882,6 +2887,11 @@ export default function App() {
 
       {selected && (
         <div className={`detail-overlay${detailClosing ? " is-closing" : ""}`}>
+          {window.videoAPI.platform === "darwin" && (
+            <div className="mac-detail-titlebar" aria-hidden="true">
+              影窗
+            </div>
+          )}
           {window.videoAPI.platform !== "android" && (
             <div className="detail-toolbar">
               <button

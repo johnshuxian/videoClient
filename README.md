@@ -83,32 +83,11 @@ npm run sync:harmony
 
 API 26 工程已通过 DevEco Studio 26.0.0 编译与调试签名；真机已验证海报和视频经代理加载。DLNA 仍需在同一局域网的电视上做投屏验收。
 
-安装包输出到 `release/`。字体文件随安装包提供，不需要启动时连接 Google Fonts。macOS 发布给其他电脑时，需要按 Apple 的要求签名和公证。首页数据和点播资源都依赖相应的第三方服务；个别线路失效时，可以在搜索结果中换源。接收设备需支持对应的投屏协议，并能自行访问视频源地址。
+安装包输出到 `release/`。字体文件随安装包提供，不需要启动时连接 Google Fonts。macOS 默认使用无需苹果开发者账号或证书的 ad-hoc 签名，未经过 Apple 公证，首次启动仍可能需要手动放行。首页数据和点播资源都依赖相应的第三方服务；个别线路失效时，可以在搜索结果中换源。接收设备需支持对应的投屏协议，并能自行访问视频源地址。
 Windows 安装包使用安装向导，可在安装时选择目录。
-发布新版本时，先更新 `package.json` 的版本号，再推送对应的 `vX.Y.Z` 标签。GitHub Actions 会构建 Windows x64 安装包、Apple Silicon（ARM64）macOS DMG、Android 手机 APK、原生 Android 电视 APK 和 HarmonyOS 签名 HAP，并发布到 GitHub Releases。文件名分别为 `videoClient-vX.Y.Z-windows-x64.exe`、`videoClient-vX.Y.Z-macos-arm64.dmg`、`videoClient-vX.Y.Z-android.apk`、`videoClient-vX.Y.Z-android-tv.apk` 和 `videoClient-vX.Y.Z-harmony.hap`，也可在运行记录的 Artifacts 中下载。桌面端 CI 产物未签名；向其他 Mac 分发前仍需配置 Apple 签名和公证。
+发布新版本时，先更新 `package.json` 的版本号，再推送对应的 `vX.Y.Z` 标签。GitHub Actions 会构建 Windows x64 安装包、Apple Silicon（ARM64）macOS DMG、Android 手机 APK、原生 Android 电视 APK 和 HarmonyOS 签名 HAP，并发布到 GitHub Releases。文件名分别为 `videoClient-vX.Y.Z-windows-x64.exe`、`videoClient-vX.Y.Z-macos-arm64.dmg`、`videoClient-vX.Y.Z-android.apk`、`videoClient-vX.Y.Z-android-tv.apk` 和 `videoClient-vX.Y.Z-harmony.hap`，也可在运行记录的 Artifacts 中下载。Windows CI 产物未签名；macOS CI 会对 App 和 Helper 进行 ad-hoc 签名，并在上传前校验签名，无需配置 macOS 签名 Secrets。若要让下载的 Mac 应用通过默认 Gatekeeper 检查，仍需改用 Developer ID 签名并完成 Apple 公证。
 
-GitHub 仓库的 Actions Secrets 需要配置 `ANDROID_KEYSTORE_BASE64`（同一份 JKS 密钥库的 Base64 内容）和 `ANDROID_KEYSTORE_PASSWORD`。构建工作流在生成签名版 APK 时读取它们，并核对证书 SHA-256 指纹 `7F:98:3E:F3:2A:1B:69:A8:4E:D1:94:79:78:13:E1:88:C4:66:DD:BC:CE:E1:A7:43:89:0C:6F:36:B5:58:FE:D1`；密钥缺失或签名不一致时直接失败，避免再次发布不同签名的 APK。请在仓库外备份原始 JKS 和密码，后续版本必须继续使用同一密钥。本地 `npm run dist:android` 仍生成调试签名 APK；旧版 GitHub 调试签名 APK 无法用新正式签名直接覆盖安装，需要先卸载一次。
-
-### 找回 GitHub 中的 Android 签名材料
-
-如果本地 JKS 和密码丢失，但仓库里的两项 Secrets 仍在，可通过 `Recover Android signing secrets` 手动工作流加密找回。[GitHub 会遮盖日志中的 Secret](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets)，直接打印通常只会显示 `***`；这里用本机公钥加密，只打印密文，不占用 Artifact 存储配额。
-
-1. 将新增工作流和脚本推送到默认分支，然后在本机仓库根目录执行以下 PowerShell 命令（不需要 `npm install`）：
-
-   ```powershell
-   node scripts/recover-android-signing.mjs prepare
-   Get-Content -Raw .\android-signing-recovery\recovery-public-key-base64.txt | Set-Clipboard
-   ```
-
-2. 在 GitHub 的 **Actions → Recover Android signing secrets → Run workflow** 中，选择默认分支，把剪贴板里的公钥粘贴到 `recovery_public_key` 输入框并运行。不要上传 `recovery-private-key.pem`。
-3. 运行成功后，展开 `Print encrypted recovery data` 步骤，复制从 `-----BEGIN ANDROID SIGNING RECOVERY-----` 到 `-----END ANDROID SIGNING RECOVERY-----` 的完整内容（包含这两行，不包含日志时间戳）。在本机仓库根目录执行以下 PowerShell 命令，把剪贴板里的密文保存后解密：
-
-   ```powershell
-   Get-Clipboard -Raw | Set-Content -Encoding ascii .\android-signing-recovery\recovery-log.txt
-   node scripts/recover-android-signing.mjs decrypt .\android-signing-recovery\recovery-log.txt
-   ```
-
-解密后，仓库根目录会还原 `videoclient-release.jks` 和 `signing-password.txt`，可直接继续本地签名构建；两项原始环境变量保存在 `android-signing-recovery/android-signing-secrets.json`。脚本不会在终端显示密钥或密码，也不会覆盖已有签名文件。找回目录已加入 Git 忽略，包含解密私钥和明文结果，请另行安全备份。此前生成的公钥和私钥可以继续使用，原先下载的加密 JSON 文件也仍可解密。该流程使用仓库 Secrets，与现有 APK 构建一致。
+GitHub 仓库的 Actions Secrets 需要配置 `ANDROID_KEYSTORE_BASE64`（同一份 JKS 密钥库的 Base64 内容）和 `ANDROID_KEYSTORE_PASSWORD`。工作流只在构建签名版 APK 时读取它们，并核对证书 SHA-256 指纹 `7F:98:3E:F3:2A:1B:69:A8:4E:D1:94:79:78:13:E1:88:C4:66:DD:BC:CE:E1:A7:43:89:0C:6F:36:B5:58:FE:D1`；密钥缺失或签名不一致时直接失败，避免再次发布不同签名的 APK。请在仓库外备份原始 JKS 和密码，后续版本必须继续使用同一密钥。本地 `npm run dist:android` 仍生成调试签名 APK；旧版 GitHub 调试签名 APK 无法用新正式签名直接覆盖安装，需要先卸载一次。
 
 ### GitHub 上的鸿蒙构建设置
 
@@ -124,9 +103,11 @@ GitHub 仓库的 Actions Secrets 需要配置 `ANDROID_KEYSTORE_BASE64`（同一
 
 CI 会校验 `.cer` 的 SHA-256 为 `50599d171bf509a40dfa214b5bcd366b2b6ff9c762aa67781a600b8b79c4c5c6`，不一致就停止构建，避免发布无法覆盖当前安装版的 HAP。当前使用的自动调试签名配置通常只允许已登记的设备安装；若要面向所有设备分发，需先在华为开发者平台申请正式发布签名，这会涉及签名迁移。本工作流也支持在 Actions 页面手动运行，手动运行只上传构建产物，不创建 GitHub Release。
 
-### macOS 未签名版本首次打开
+### macOS ad-hoc 签名与首次打开
 
-从本项目的 GitHub Releases 下载 DMG，把「影窗.app」拖入「应用程序」后，如果启动时提示应用「已损坏」，可在确认下载来源后打开终端执行：
+在 Mac 上运行 `npm run dist:mac` 即可生成带 ad-hoc 签名的 DMG。配置保留 Hardened Runtime，并为主进程和 Helper 声明 JIT 与加载 Electron 框架所需的权限。ad-hoc 签名不提供苹果认可的开发者身份，也不能用于 Apple 公证。
+
+从本项目的 GitHub Releases 下载 DMG，把「影窗.app」拖入「应用程序」。首次打开若提示无法验证开发者或 Apple 无法检查恶意软件，可在确认下载来源后到「系统设置 → 隐私与安全性」中点击「仍要打开」。如果提示应用「已损坏」，可打开终端执行：
 
 ```bash
 sudo xattr -dr com.apple.quarantine "/Applications/影窗.app"

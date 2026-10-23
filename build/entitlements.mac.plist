@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <!-- 主进程和 Helper 共用；Electron 的 V8 引擎需要 JIT 编译。 -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <!-- ad-hoc 签名没有 Team ID，需允许加载 Electron 自带的签名框架。 -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+  </dict>
+</plist>

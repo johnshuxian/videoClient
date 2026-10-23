@@ -70,6 +70,11 @@
     },
     "mac": {
       "artifactName": "videoClient-v${version}-macos-${arch}.${ext}",
+      "identity": "-",
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "notarize": false,
       "target": [
         "dmg"
       ],
