@@ -53,8 +53,13 @@ if (process.versions.electron) {
     const server = await createServer({
       configFile: false,
       root: path.join(__dirname, ".."),
-      // 本地仓库可能含 Android SDK 和构建报告，依赖扫描只需覆盖测试使用的组件。
-      optimizeDeps: { entries: ["src/App.tsx"] },
+      cacheDir: "node_modules/.vite-player-test",
+      // 测试 HTML 由中间件生成；显式预编译依赖，避免冷启动发现新依赖后重载测试页面。
+      optimizeDeps: {
+        noDiscovery: true,
+        force: true,
+        include: ["react", "react/jsx-runtime", "react/jsx-dev-runtime", "react-dom/client", "artplayer", "hls.js", "lucide-react", "@capacitor/app"],
+      },
       server: { host: "127.0.0.1", port: 0 },
       plugins: [{
         name: "player-lifecycle-test",
