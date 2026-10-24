@@ -18,6 +18,13 @@ data class TvHistoryEntry(
     val updatedAt: Long,
 ) {
     val key: String get() = "${item.sourceUrl}:${item.id}"
+
+    internal fun resumePositionFor(episodes: List<Episode>, index: Int): Long {
+        // 先按集名匹配，源调整集数顺序后也能续播；集名变更时沿用记录中的序号。
+        val savedIndex = episodes.indexOfFirst { it.label == episodeLabel }.takeIf { it >= 0 }
+            ?: episodeIndex.takeIf { it in episodes.indices }
+        return if (index == savedIndex) positionMs.coerceAtLeast(0L) else 0L
+    }
 }
 
 class TvSettings(context: Context) {

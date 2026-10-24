@@ -838,7 +838,7 @@ fun NativePlayer(
                                     selected = playing,
                                     tab = true,
                                     fontSize = 16,
-                                    icon = if (playing) R.drawable.tv_player_play else null,
+                                    icon = if (playing) R.drawable.tv_button_play else null,
                                     modifier = if (index == focusIndex) Modifier.focusRequester(episodeFocus) else Modifier,
                                     onClick = {
                                         reportPosition()

@@ -345,16 +345,20 @@ private fun TvApp(updater: AppUpdater, onExit: () -> Unit) {
         index: Int,
         targetLineIndex: Int,
         triedLines: Set<Int> = setOf(targetLineIndex),
-        startPositionMs: Long = 0L,
+        startPositionMs: Long? = null,
         status: String = "正在解析播放地址...",
     ) {
-        val episode = detail?.lines?.getOrNull(targetLineIndex)?.episodes?.getOrNull(index) ?: return
+        val episodes = detail?.lines?.getOrNull(targetLineIndex)?.episodes ?: return
+        val episode = episodes.getOrNull(index) ?: return
+        // 手动选中已看过的当前集也应续播；换线等流程显式传入的位置优先。
+        val position = startPositionMs ?: history.firstOrNull { it.key == selectedVideo?.key }
+            ?.resumePositionFor(episodes, index) ?: 0L
         selectedVideo?.let { item -> if (refreshedDetail == null) detail?.let { settings.saveDetail(item, it) } }
         lineIndex = targetLineIndex
         playingIndex = index
         attemptedLines = triedLines
-        resumePositionMs = startPositionMs
-        currentPositionMs = startPositionMs
+        resumePositionMs = position
+        currentPositionMs = position
         currentDurationMs = 0L
         playbackStarted = false
         streamError = ""
@@ -367,7 +371,7 @@ private fun TvApp(updater: AppUpdater, onExit: () -> Unit) {
                 val resolved = repository.playableUrl(episode.url)
                 if (version == playVersion && screen == "player") streamUrl = resolved
             } catch (failure: Exception) {
-                if (version == playVersion && screen == "player") switchLineOnFailure(failure.message ?: "视频地址无法解析", startPositionMs)
+                if (version == playVersion && screen == "player") switchLineOnFailure(failure.message ?: "视频地址无法解析", position)
             }
         }
     }
@@ -888,7 +892,7 @@ private fun TvApp(updater: AppUpdater, onExit: () -> Unit) {
                     Label("${prompt.entry.item.sourceName.ifBlank { prompt.entry.item.sourceUrl }} 曾播放到 $label（约 ${prompt.entry.positionMs / 60_000} 分钟）。是否从当前源继续播放？", 20, muted)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End)) {
                         FocusButton("暂不恢复", onClick = { otherSourcePrompt = null })
-                        FocusButton("恢复播放记录", primary = true, icon = R.drawable.tv_player_play,
+                        FocusButton("恢复播放记录", primary = true, icon = R.drawable.tv_button_play,
                             modifier = Modifier.focusRequester(confirmOtherSourceFocus), onClick = {
                             val position = prompt.entry.positionMs.takeIf {
                                 it > 5_000 && (prompt.entry.durationMs <= 0 || it < prompt.entry.durationMs - 15_000)

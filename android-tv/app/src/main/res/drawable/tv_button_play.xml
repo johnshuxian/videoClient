@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 按钮图标的画布贴合三角形，避免透明边距让“图标＋文字”看起来偏右。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="10.5dp"
+    android:height="12.5dp"
+    android:viewportWidth="25"
+    android:viewportHeight="30">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M0,0v30l25,-15z" />
+</vector>

@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.aspectRatio
@@ -169,9 +170,12 @@ fun FocusButton(
             .padding(horizontal = 16.dp, vertical = if (tab) 4.dp else 8.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        // 图标与文字作为同一组居中，二者之间保持固定间距。
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)) {
             if (loading) LoadingIndicator()
-            else if (icon != null) Image(painterResource(icon), null, colorFilter = ColorFilter.tint(ink), modifier = Modifier.size(20.dp))
+            // 图标保持自身尺寸及长宽比，20dp 仅作为上限。
+            else if (icon != null) Image(painterResource(icon), null, colorFilter = ColorFilter.tint(ink),
+                modifier = Modifier.sizeIn(maxWidth = 20.dp, maxHeight = 20.dp))
             Label(label, fontSize, ink, bold = true, maxLines = 1)
         }
     }

@@ -157,7 +157,7 @@ internal fun TvBrowseScreen(
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(18.dp)) {
                 Label("影窗 TV", 24, white, bold = true)
-                FocusButton("搜索电影、电视、综艺", icon = R.drawable.tv_search, outlined = true,
+                FocusButton("搜索电影、电视、综艺", icon = R.drawable.tv_button_search, outlined = true,
                     modifier = Modifier.widthIn(min = 260.dp)
                         .focusRequester(searchFocus).focusProperties {
                         up = FocusRequester.Cancel; down = activeMenu; left = FocusRequester.Cancel; right = settingsFocus
@@ -611,11 +611,11 @@ private fun TvHistoryList(
             LazyVerticalGrid(columns = GridCells.Fixed(1), state = state.grid, modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(start = 48.dp, top = 24.dp, end = 48.dp, bottom = 64.dp)) {
                 item(key = "header", contentType = "header") {
-                    Column(Modifier.padding(bottom = 12.dp)) {
+                    Column(Modifier.padding(bottom = 8.dp)) {
                         header()
-                        Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Label("播放记录 · ${history.size}", 24, white, Modifier.weight(1f), bold = true)
-                            if (history.isNotEmpty()) FocusButton("删除全部", destructive = true,
+                        Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Label("播放记录 · ${history.size}", 20, white, Modifier.weight(1f), bold = true)
+                            if (history.isNotEmpty()) FocusButton("删除全部", destructive = true, tab = true, fontSize = 16,
                                 modifier = Modifier.focusRequester(clearFocus).focusProperties { this.up = up }
                                     .onPreviewKeyEvent { event ->
                                         if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown) { state.enterPosters(keys); true } else false
@@ -670,7 +670,7 @@ private fun TvHistoryList(
                             }
                         }
                         // 把行间距也放进收缩区域，删除结束时不会额外跳动一个间距。
-                        .padding(bottom = 12.dp)
+                        .padding(bottom = 8.dp)
                         .onPreviewKeyEvent { event ->
                             val code = event.nativeKeyEvent.keyCode
                             val confirm = code == android.view.KeyEvent.KEYCODE_DPAD_CENTER ||
@@ -737,15 +737,21 @@ private fun TvHistoryList(
                             .focusRequester(focus)
                             .onFocusChanged { focused = it.isFocused; if (it.isFocused) state.posterFocused(entry.key) }
                             .clip(shape).background(if (focused) white else panel)
-                            .clickable { if (revealedKey != null) closeDelete() else resumeEntry() }.padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            Poster(entry.item.poster, repository, Modifier.width(80.dp).height(112.dp))
+                            .clickable { if (revealedKey != null) closeDelete() else resumeEntry() }.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Poster(entry.item.poster, repository, Modifier.width(52.dp).height(74.dp))
                             Column(Modifier.weight(1f)) {
-                                Label(entry.item.title, 24, if (focused) focusInk else white, bold = true, maxLines = 1)
-                                Label("${entry.episodeLabel} · ${entry.item.sourceName}", 20, if (focused) Color(0xFF53535E) else muted, Modifier.padding(top = 7.dp), maxLines = 1)
-                                val seconds = entry.positionMs / 1000
-                                Label("看到 %02d:%02d".format(seconds / 60, seconds % 60), 20, if (focused) Color(0xFF9E410C) else accent, Modifier.padding(top = 7.dp))
-                                Box(Modifier.fillMaxWidth().padding(top = 10.dp).height(6.dp).background(Color(0xFF44444B))) {
+                                Label(entry.item.title, 20, if (focused) focusInk else white, bold = true, maxLines = 1)
+                                // 集数、来源和观看时间合并为一行，长来源省略时仍保留续播时间。
+                                Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Label("${entry.episodeLabel} · ${entry.item.sourceName}", 16,
+                                        if (focused) Color(0xFF53535E) else muted, Modifier.weight(1f), maxLines = 1)
+                                    val seconds = entry.positionMs / 1000
+                                    Label("看到 %02d:%02d".format(seconds / 60, seconds % 60), 16,
+                                        if (focused) Color(0xFF9E410C) else accent, maxLines = 1)
+                                }
+                                Box(Modifier.fillMaxWidth().padding(top = 8.dp).height(3.dp).background(Color(0xFF44444B))) {
                                     val progress = if (entry.durationMs > 0) (entry.positionMs.toFloat() / entry.durationMs).coerceIn(0f, 1f) else 0f
                                     Box(Modifier.fillMaxWidth(progress).fillMaxHeight().background(accent))
                                 }

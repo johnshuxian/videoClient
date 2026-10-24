@@ -11,6 +11,9 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -32,7 +35,7 @@ class TvDetailFocusTest {
     @get:Rule val compose = createComposeRule()
     private lateinit var grid: LazyGridState
 
-    private fun showDetail(search: Boolean = false, restoreEpisode: Int? = null) {
+    private fun showDetail(search: Boolean = false, restoreEpisode: Int? = null, descriptionRepeats: Int = 8) {
         compose.setContent {
             val state = rememberLazyGridState()
             grid = state
@@ -42,7 +45,7 @@ class TvDetailFocusTest {
             val repository = remember { VodRepository() }
             val detail = remember {
                 VideoDetail("详情页滚动回归", "", "2026", "中国", "演员甲、演员乙",
-                    "用于验证详情页上下移动后，海报、片名和剧情介绍完整显示。".repeat(8),
+                    "用于验证详情页上下移动后，海报、片名和剧情介绍完整显示。\n".repeat(descriptionRepeats),
                     listOf(PlayLine("默认", (1..120).map { Episode("第${it}集", "") })))
             }
             TvDetailScreen(detail, "测试源", 0, restoreEpisode ?: 0, false, null, "", repository,
@@ -60,7 +63,7 @@ class TvDetailFocusTest {
         repeat(12) { compose.onNode(isFocused()).performKeyInput { pressKey(Key.DirectionDown) } }
         compose.runOnIdle { assertTrue("下移后应已滚动到选集区", grid.canScrollBackward) }
         for (attempt in 0..24) {
-            val actionFocused = listOf("立刻播放", "搜索其他资源").any { text ->
+            val actionFocused = listOf("立刻播放", "搜索更多").any { text ->
                 compose.onAllNodesWithText(text).fetchSemanticsNodes().any {
                     it.config.getOrNull(SemanticsProperties.Focused) == true
                 }
@@ -92,7 +95,7 @@ class TvDetailFocusTest {
         showDetail(search = true)
         // 模拟触屏滚动后，搜索按钮仍保持焦点、介绍区却已离开顶部的情况。
         compose.runOnIdle { grid.requestScrollToItem(0, 150) }
-        compose.onNodeWithText("搜索其他资源").assertIsFocused().performKeyInput {
+        compose.onNodeWithText("搜索更多").assertIsFocused().performKeyInput {
             pressKey(Key.DirectionUp)
             pressKey(Key.DirectionLeft)
         }
@@ -107,5 +110,21 @@ class TvDetailFocusTest {
         compose.mainClock.advanceTimeBy(1_000)
         compose.onNodeWithText("第81集").assertIsFocused()
         compose.runOnIdle { assertTrue("播放器返回时不能被页头滚动抢走位置", grid.firstVisibleItemIndex > 0) }
+    }
+
+    @Test
+    fun fullDescriptionScrollsWithTheRemoteAndClosingRestoresItsButton() {
+        showDetail(search = true, descriptionRepeats = 40)
+        compose.onNodeWithText("搜索更多").performKeyInput { pressKey(Key.DirectionRight) }
+        compose.onNodeWithText("完整简介").assertIsFocused().performKeyInput { pressKey(Key.Enter) }
+        compose.onNodeWithText("关闭").assertIsFocused().performKeyInput { pressKey(Key.DirectionDown) }
+        val description = compose.onNode(hasScrollAction() and hasAnyAncestor(isDialog())).fetchSemanticsNode()
+        compose.runOnIdle {
+            assertTrue("长简介应响应遥控器下键滚动", description.config[SemanticsProperties.VerticalScrollAxisRange].value() > 0f)
+            assertEquals("简介滚动不应带动底层选集列表", 0, grid.firstVisibleItemScrollOffset)
+        }
+        compose.onNodeWithText("关闭").assertIsFocused().performKeyInput { pressKey(Key.Enter) }
+        compose.onNodeWithText("关闭").assertDoesNotExist()
+        compose.onNodeWithText("完整简介").assertIsFocused()
     }
 }
