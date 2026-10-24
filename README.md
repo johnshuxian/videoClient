@@ -1,6 +1,22 @@
 # 影窗
 
-Windows / macOS 桌面、Android 手机和平板，以及独立原生 Android 电视点播客户端。电影、电视剧和综艺推荐来自豆瓣，番剧榜单来自 Bangumi。初次安装不内置点播源，需要在「播放设置」中粘贴 VOD 订阅地址并导入，例如[这份 vod.json 源清单](https://raw.githubusercontent.com/johnshuxian/IPTVM3U/refs/heads/master/vod.json)。
+支持 Windows / macOS 桌面、Android 手机和平板、独立原生 Android TV，以及 HarmonyOS 7 的点播客户端。电影、电视剧和综艺推荐来自豆瓣，番剧榜单来自 Bangumi。
+
+## 下载与首次使用
+
+桌面和安卓安装包可从 [GitHub Releases](https://github.com/johnshuxian/videoClient/releases) 下载，按设备选择对应文件：
+
+| 平台 | 安装包 | 说明 |
+| --- | --- | --- |
+| Windows x64 | `videoClient-vX.Y.Z-windows-x64.exe` | NSIS 安装向导，可选择安装目录 |
+| macOS Apple Silicon（ARM64） | `videoClient-vX.Y.Z-macos-arm64.dmg` | 打开后将「影窗.app」拖入「应用程序」 |
+| Android 手机、平板 | `videoClient-vX.Y.Z-android.apk` | 最低 Android 7.0（API 24） |
+| Android TV | `videoClient-vX.Y.Z-android-tv.apk` | 最低 Android 8.0（API 26），独立电视应用 |
+| HarmonyOS 7 | 本地构建签名 HAP | 构建方法见下方鸿蒙工程说明，当前 GitHub 发布流程不包含 HAP |
+
+初次安装不内置点播源，需要在「播放设置」中粘贴 VOD 订阅地址并导入，例如[这份 vod.json 源清单](https://raw.githubusercontent.com/johnshuxian/IPTVM3U/refs/heads/master/vod.json)。导入并启用点播源后即可搜索、浏览和播放。设置与播放记录保存在各设备本地，不跨设备同步。
+
+### 转换 TVBox 订阅
 
 可用下面的命令把 TVBox 多线路订阅中的直连 JSON 点播接口检测后转换成影窗的 `sources` 格式。第二个参数是输出文件，第三个参数可选，用作搜索测试关键词；命令还会生成同名的 `.report.json` 检测明细。
 
@@ -24,11 +40,30 @@ npm run probe:tvbox -- "https://gh-proxy.com/https://raw.githubusercontent.com/n
 - 播放器下方展示影片海报、年份、地区、来源、主演和剧情简介
 - 默认浅色模式；源清单、播放偏好、设备和播放记录保存在 `settings.db`（SQLite），普通设置、播放记录和详情缓存分别使用 `settings`、`play_history`、`detail_cache` 表
 
-Windows、macOS、Android 手机和平板及 Android TV 可点击设置页右上角版本号检查更新。“精确搜索”下的“线路选择”默认使用 `gh-proxy`，也可切换为 GitHub 直连；选择保存在本机，仅影响更新检查和安装包下载。发现新版本后显示“取消 / 同意”，同意后下载对应平台安装包、显示进度并校验大小和 SHA-256，校验通过才打开安装程序。Windows 启动安装向导后退出当前应用；macOS 打开 DMG 后需把应用拖入“应用程序”。Android 会校验包名、版本与当前安装版的签名，首次更新需要允许影窗安装未知应用，授权返回后继续打开系统安装界面。鸿蒙端不提供该更新入口。
+桌面、Android 手机和平板及鸿蒙端的搜索框保存最近 10 条搜索，可点选重搜、逐条删除或清空。各端搜索提交时会去掉首尾空格、把连续空格合并为一个，并用整理后的完整内容查询点播源。“精确搜索”默认关闭；开启后，只显示片名包含第一段关键词的结果。例如“牧神记 年番3”会提交完整内容搜索，但结果仅显示片名包含“牧神记”的影片。
 
-更新信息与安装包直接使用当前公开仓库的 GitHub Releases，无需新增服务端或额外的版本描述文件。后续继续递增 `package.json` 版本并发布对应标签即可；尚未内置该功能的旧版本需要先手动安装一次。各端详情页和电视选集面板只显示集数，播放线路在失败时由程序自动切换。
+各端详情页和电视选集面板只显示集数，播放线路在失败时由程序自动切换。全屏播放电影或最后一集结束、没有下一集时，自动退出播放器并回到详情页；有下一集时继续连播。
 
-全屏播放电影或最后一集结束、没有下一集时，各端自动退出播放器并回到详情页；有下一集时保留原来的连播行为。检查更新的“当前已是最新版本”和失败结果以居中弹窗显示，2 秒后自动消失；发现新版本的下载确认窗仍等待用户选择，下载期间保留进度提示。
+## 应用更新
+
+Windows、macOS、Android 手机和平板及 Android TV 可点击设置页右上角版本号检查更新。“精确搜索”下的“线路选择”默认使用 `gh-proxy`，也可切换为 GitHub 直连；选择保存在本机，仅影响更新检查和安装包下载。更新信息和安装包来自当前仓库的 GitHub Releases，无需额外服务端。
+
+发现新版本后显示“取消 / 同意”，同意后才下载安装包、显示进度，并校验文件大小和 SHA-256。校验通过后按平台继续安装：
+
+- **Windows**：打开安装向导后退出当前应用。
+- **macOS**：打开 DMG，需手动将应用拖入「应用程序」。
+- **Android 手机、平板与 TV**：额外校验包名、版本和当前安装版的签名；首次更新需允许影窗安装未知应用，授权返回后继续打开系统安装界面。
+
+“当前已是最新版本”和检查失败的结果以居中弹窗显示，2 秒后消失；下载确认窗等待用户选择，下载期间显示进度。鸿蒙端目前不提供应用内更新入口。
+
+### 更新文件清理
+
+每次检查更新时，先清理上次下载的安装包和残留文件，再请求版本信息：
+
+- **Windows / macOS**：删除系统临时目录下本应用创建的 `videoclient-update-*` 文件夹。
+- **Android 手机、平板与 TV**：清空应用缓存中的 `updates` 目录，并重置上次待安装的状态。
+
+清理只涉及更新缓存，设置和播放记录保留。下载期间禁用检查更新，避免删除正在下载的文件；下载失败或校验失败时会清理 `.part` 文件。完整安装包下载后保留到下一次检查更新时清理。
 
 ## 开发
 
@@ -39,14 +74,28 @@ npm ci
 npm run dev
 ```
 
+提交代码前可运行桌面测试和 Web 构建：
+
+```bash
+npm test
+npm run build:web
+```
+
+原生 TV 测试使用 JDK 21。在 Windows 的 `android-tv/` 目录下运行 `./gradlew.bat :app:testDebugUnitTest`，覆盖遥控器焦点、快进预览、列表状态和安卓共用更新逻辑。
+
 ## 构建
+
+### 桌面端
 
 ```bash
 npm run build:web
 npm run dist:win  # 在 Windows 上生成 NSIS 安装包
 npm run dist:mac  # 在 macOS 上生成 DMG
-npm test
 ```
+
+桌面安装包输出到 `release/`。字体随安装包提供，启动时无需连接 Google Fonts。
+
+### Android 手机和平板
 
 Android 版需要 JDK 21、Android SDK Platform 36 和 Build Tools 35.0.0。在 Windows 上运行：
 
@@ -56,10 +105,7 @@ npm run dist:android
 
 调试签名 APK 输出到 `android/app/build/outputs/apk/debug/app-debug.apk`，可安装到 Android 手机、平板。安卓端在原生 SQLite 中保存设置和播放记录，支持跟随设备旋转、手机端顶部分类与底部四入口、本机播放和 DLNA 投屏。手机与电视需连接同一局域网，电视需支持并开启 DLNA 视频接收。桌面版数据库不会自动同步到安卓端，首次使用需重新导入点播源。
 
-在 Windows 上双击 `build-install-android.cmd`，可一键构建网页资源、同步 Android 工程、编译 release 签名 APK 并覆盖安装到唯一已连接的设备。脚本默认使用项目根目录下的 `android-sdk/`（已加入 Git 忽略），也支持 `ANDROID_HOME` 或 `ANDROID_SDK_ROOT`；连接多台设备时运行 `./build-install-android.cmd -DeviceId '设备编号'`，其他 SDK 位置可加 `-AndroidSdk 'D:\Android\Sdk'`。需要仓库根目录的 `videoclient-release.jks` 和 `signing-password.txt`，或使用 `ANDROID_KEYSTORE_PATH` 与 `ANDROID_KEYSTORE_PASSWORD`。脚本会核对 release 证书指纹，安装包位于 `android/app/build/outputs/apk/release/app-release.apk`；覆盖安装不会清除应用数据。
-
-搜索框会在各端分别保存最近 10 条搜索，可点选重搜、逐条删除或清空；记录保存在各设备本地，不跨设备同步。
-搜索提交时会去掉首尾空格、把连续空格合并为一个，并用整理后的完整内容查询点播源。各端设置页的“精确搜索”默认关闭；开启后，如果搜索内容包含空格，只取第一段作为结果筛选关键词，例如“牧神记 年番3”会提交完整内容搜索，但结果仅显示片名包含“牧神记”的影片。关闭后恢复显示源返回的全部结果。
+在 Windows 上安装 PowerShell 7、配置 JDK 21 并授权设备 USB 调试后，双击 `build-install-android.cmd`，可一键构建网页资源、同步 Android 工程、编译 release 签名 APK 并覆盖安装到唯一已连接的设备。脚本默认使用项目根目录下的 `android-sdk/`（已加入 Git 忽略），也支持 `ANDROID_HOME` 或 `ANDROID_SDK_ROOT`；连接多台设备时运行 `./build-install-android.cmd -DeviceId '设备编号'`，其他 SDK 位置可加 `-AndroidSdk 'D:\Android\Sdk'`。需要仓库根目录的 `videoclient-release.jks` 和 `signing-password.txt`，或使用 `ANDROID_KEYSTORE_PATH` 与 `ANDROID_KEYSTORE_PASSWORD`。脚本会核对 release 证书指纹，安装包位于 `android/app/build/outputs/apk/release/app-release.apk`；覆盖安装不会清除应用数据。
 
 ### 原生 Android 电视端
 
@@ -81,6 +127,8 @@ npm run dist:android
 
 播放器底栏的倍速、下一集、选集等提示跟随实际聚焦按钮显示，并避开进度条和屏幕边缘。每次从底栏或遥控器菜单键打开选集面板，都会定位当前播放集；窗口获得焦点、当前集完成布局后才解除恢复保护，当前集保留播放图标和选中状态。
 
+遥控器短按和长按统一显示“快进 / 快退 N 秒 · 目标时间”。按下时立即展示目标位置，松手后保留最终提示 1 秒再消失；预览和跳转提示显示期间隐藏底栏的普通焦点提示，避免重叠。
+
 电视端播放点播 HLS 时会过滤显式广告标记，并按整组地址特征、短片头和两长段之间的短中插识别广告；直播 HLS、字节范围清单和 MP4 保持原有播放方式。
 
 需要 JDK 21、Android SDK Platform 36 和 Build Tools 35.0.0，并配置 release 签名。在 Windows 上运行 `npm run dist:android-tv`，签名 APK 输出到 `android-tv/app/build/outputs/apk/release/app-release.apk`。发布标签的 GitHub Actions 也会生成 `videoClient-vX.Y.Z-android-tv.apk`。
@@ -99,27 +147,19 @@ npm run sync:harmony
 
 鸿蒙工程已接入首页、点播源请求、搜索、本地设置、图片和视频的本机代理，以及 DLNA 搜索、投屏与进度查询。进入播放页后在详情页内自动播放，手动点击全屏时仅播放器横向铺满屏幕并隐藏系统栏，页面方向保持不变；浅色和深色模式同步设置状态栏、导航栏颜色。鸿蒙端设置、播放记录和详情缓存保存在本机 `settings.db`，旧的 ArkWeb 设置与播放记录会在首次启动时迁入。点播 HLS 清单会过滤显式广告标记，并按整组地址特征、短片头和两长段之间的短中插识别广告；直播和字节范围清单保留原样。
 
-API 26 工程已通过 DevEco Studio 26.0.0 编译与调试签名；真机已验证海报和视频经代理加载。DLNA 仍需在同一局域网的电视上做投屏验收。
+鸿蒙版目前通过本地构建安装，GitHub Actions 未配置 HAP 构建、签名或发布任务。自动调试签名通常只允许已登记的设备安装；面向其他设备分发时需配置相应的发布签名。
 
-安装包输出到 `release/`。字体文件随安装包提供，不需要启动时连接 Google Fonts。macOS 默认使用无需苹果开发者账号或证书的 ad-hoc 签名，未经过 Apple 公证，首次启动仍可能需要手动放行。首页数据和点播资源都依赖相应的第三方服务；个别线路失效时，可以在搜索结果中换源。接收设备需支持对应的投屏协议，并能自行访问视频源地址。
-Windows 安装包使用安装向导，可在安装时选择目录。
-发布新版本时，先更新 `package.json` 的版本号，再推送对应的 `vX.Y.Z` 标签。GitHub Actions 会构建 Windows x64 安装包、Apple Silicon（ARM64）macOS DMG、Android 手机 APK、原生 Android 电视 APK 和 HarmonyOS 签名 HAP，并发布到 GitHub Releases。文件名分别为 `videoClient-vX.Y.Z-windows-x64.exe`、`videoClient-vX.Y.Z-macos-arm64.dmg`、`videoClient-vX.Y.Z-android.apk`、`videoClient-vX.Y.Z-android-tv.apk` 和 `videoClient-vX.Y.Z-harmony.hap`，也可在运行记录的 Artifacts 中下载。Windows CI 产物未签名；macOS CI 会对 App 和 Helper 进行 ad-hoc 签名，并在上传前校验签名，无需配置 macOS 签名 Secrets。若要让下载的 Mac 应用通过默认 Gatekeeper 检查，仍需改用 Developer ID 签名并完成 Apple 公证。
+## 发布与签名
 
-GitHub 仓库的 Actions Secrets 需要配置 `ANDROID_KEYSTORE_BASE64`（同一份 JKS 密钥库的 Base64 内容）和 `ANDROID_KEYSTORE_PASSWORD`。工作流只在构建签名版 APK 时读取它们，并核对证书 SHA-256 指纹 `7F:98:3E:F3:2A:1B:69:A8:4E:D1:94:79:78:13:E1:88:C4:66:DD:BC:CE:E1:A7:43:89:0C:6F:36:B5:58:FE:D1`；密钥缺失或签名不一致时直接失败，避免再次发布不同签名的 APK。请在仓库外备份原始 JKS 和密码，后续版本必须继续使用同一密钥。本地 `npm run dist:android` 仍生成调试签名 APK；旧版 GitHub 调试签名 APK 无法用新正式签名直接覆盖安装，需要先卸载一次。
+发布新版本时，更新 `package.json` 和 `package-lock.json` 中的版本号；鸿蒙工程运行 `npm run sync:harmony` 同步版本。通过测试和构建后提交代码，再推送匹配的 `vX.Y.Z` 标签。
 
-### GitHub 上的鸿蒙构建设置
+当前 [GitHub Actions 工作流](.github/workflows/build.yml) 仅由 `v*` 标签推送触发，构建 Windows x64 安装包、Apple Silicon（ARM64）macOS DMG、Android 手机 APK 和原生 Android TV APK。全部构建成功后发布到 GitHub Releases，也可在运行记录的 Artifacts 中下载产物。
 
-鸿蒙任务使用带 `harmony` 标签的 Windows x64 自托管 Runner。到仓库 **Settings → Actions → Runners → New self-hosted runner**，按 GitHub 给出的 Windows 命令安装并启动 Runner，添加 `harmony` 标签。Runner 需要 PowerShell 7、DevEco Studio 26 和 HarmonyOS API 26 SDK；工作流默认从 `E:\mysoft\DevEco Studio` 调用工具。若 Runner 装在其他机器，请先修改工作流中的 `DEVECO_HOME`。Runner 必须保持在线，鸿蒙任务才能开始。
+Windows CI 产物未签名；macOS CI 会对 App 和 Helper 进行 ad-hoc 签名，并在上传前校验，无需配置 macOS 签名 Secrets。默认产物未经过 Apple 公证；需要通过默认 Gatekeeper 检查时，需改用 Developer ID 签名并完成公证。
 
-本机鸿蒙签名材料保存在仓库根目录的 `harmony-signing/`（已加入 Git 忽略）。在这台电脑的 PowerShell 7 中运行以下命令，脚本会把 `.p12`、配套的 `.cer` 和 `.p7b`、DevEco 密码加密所需的 `material` 目录，以及本机签名配置打包，并将 Base64 内容复制到剪贴板：
+### Android 签名
 
-```powershell
-.\scripts\export-harmony-signing.ps1 -StoreFile '.\harmony-signing\signing.p12'
-```
-
-到仓库 **Settings → Secrets and variables → Actions → New repository secret**，添加 `HARMONY_SIGNING_BUNDLE_BASE64`，粘贴剪贴板内容。请勿将 `harmony-signing/`、Base64 或本机 `harmony/build-profile.json5` 提交到仓库。以后换构建机时，仍需使用同一套签名材料；可在新机器重新导出，并更新这一项 Secret。
-
-CI 会校验 `.cer` 的 SHA-256 为 `50599d171bf509a40dfa214b5bcd366b2b6ff9c762aa67781a600b8b79c4c5c6`，不一致就停止构建，避免发布无法覆盖当前安装版的 HAP。当前使用的自动调试签名配置通常只允许已登记的设备安装；若要面向所有设备分发，需先在华为开发者平台申请正式发布签名，这会涉及签名迁移。本工作流也支持在 Actions 页面手动运行，手动运行只上传构建产物，不创建 GitHub Release。
+GitHub 仓库的 Actions Secrets 需要配置 `ANDROID_KEYSTORE_BASE64`（JKS 密钥库的 Base64 内容）和 `ANDROID_KEYSTORE_PASSWORD`。工作流核对证书 SHA-256 指纹 `7F:98:3E:F3:2A:1B:69:A8:4E:D1:94:79:78:13:E1:88:C4:66:DD:BC:CE:E1:A7:43:89:0C:6F:36:B5:58:FE:D1`，密钥缺失或签名不一致时停止构建。请在仓库外备份 JKS 和密码，后续版本必须沿用同一密钥才能覆盖安装。`npm run dist:android` 生成的是调试签名 APK，与正式签名 APK 不能直接互相覆盖。
 
 ### macOS ad-hoc 签名与首次打开
 
@@ -134,7 +174,10 @@ open "/Applications/影窗.app"
 
 这只移除该应用的下载隔离标记，不会给应用添加 Apple 签名。重新安装新版本后可能需要再次执行。
 
-Windows 安装版的 `settings.db` 位于实际安装目录（例如 `E:\mysoft\videoClient\settings.db`），该目录需要允许当前用户写入。安装新版本时，安装器会先备份旧数据库，再恢复到新安装目录；开发版和 macOS 仍使用系统用户数据目录。
-旧版 `localStorage` 和 `settings.json` 不会迁移到 SQLite，首次使用新版需要重新设置。
-DLNA 投屏把视频源地址直接发给接收设备，由接收设备自行取流。需要代理补充请求头、依赖广告过滤或电视无法直接访问的视频源可能无法播放。播放器上绘制的弹幕不会自动随视频一起投出。
+## 数据与投屏说明
+
+Windows 安装版的 `settings.db` 位于实际安装目录，该目录需要允许当前用户写入。安装新版本时，安装器会先备份旧数据库，再恢复到新安装目录；开发版和 macOS 使用系统用户数据目录。安卓和鸿蒙使用各自应用内的数据库，设备之间不自动同步。
+
+首页数据和点播资源依赖相应的第三方服务，个别线路失效时可在搜索结果中换源。DLNA 投屏把视频源地址直接发给接收设备，由接收设备自行取流。需要代理补充请求头、依赖本机广告过滤或电视无法直接访问的视频源可能无法播放。
+
 macOS 首次搜索投屏设备时，请允许「影窗」访问本地网络；若之前拒绝，可在「系统设置 → 隐私与安全性 → 本地网络」中重新开启，然后在投屏窗口重新搜索。
