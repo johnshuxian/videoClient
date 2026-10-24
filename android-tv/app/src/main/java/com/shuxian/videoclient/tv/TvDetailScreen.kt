@@ -56,8 +56,8 @@ internal fun TvDetailScreen(
             revealHeader = false
         }
     }
-    // 详情介绍和选集共用懒加载网格，小屏幕也能完整浏览大字号操作区。
-    LazyVerticalGrid(columns = GridCells.Adaptive(168.dp), state = grid, modifier = Modifier.fillMaxSize().onPreviewKeyEvent { event ->
+    // 介绍占满整行，集数使用紧凑网格，避免短标签被少量列撑成宽按钮。
+    LazyVerticalGrid(columns = GridCells.Adaptive(112.dp), state = grid, modifier = Modifier.fillMaxSize().onPreviewKeyEvent { event ->
         if (event.type == KeyEventType.KeyDown) {
             movingUp = event.key == Key.DirectionUp
             // 重新下移时终止回顶；在顶部左右换按钮时仍需完整露出介绍。
@@ -65,7 +65,7 @@ internal fun TvDetailScreen(
         }
         false
     },
-        contentPadding = PaddingValues(horizontal = 42.dp, vertical = 24.dp),
+        contentPadding = PaddingValues(horizontal = 48.dp, vertical = 24.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item(key = "detail-header", span = { GridItemSpan(maxLineSpan) }) {
             Column {
@@ -107,7 +107,7 @@ internal fun TvDetailScreen(
             }
         }
         items(if (descending) episodes.indices.reversed().toList() else episodes.indices.toList(), key = { it }, contentType = { "episode" }) { index ->
-            FocusButton(episodes[index].label, selected = index == playingIndex, tab = true,
+            FocusButton(episodes[index].label, selected = index == playingIndex, tab = true, fontSize = 16,
                 modifier = if (index == playingIndex.coerceIn(episodes.indices)) Modifier.focusRequester(episodeFocus) else Modifier,
                 onClick = { onEpisode(index) })
         }

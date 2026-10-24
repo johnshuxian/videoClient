@@ -12,6 +12,7 @@
             android:layout_gravity="bottom" android:background="@drawable/tv_player_scrim" />
     </FrameLayout>
 
+    <!-- 缩小按钮后仍保留底部安全距离，并给焦点放大留出空间。 -->
     <FrameLayout
         android:id="@id/exo_bottom_bar"
         android:layout_width="match_parent"
@@ -19,6 +20,7 @@
         android:layout_marginTop="@dimen/exo_styled_bottom_bar_margin_top"
         android:layout_gravity="bottom"
         android:background="@android:color/transparent"
+        android:paddingBottom="24dp"
         android:layoutDirection="ltr"
         android:clipChildren="false"
         android:clipToPadding="false">
@@ -30,8 +32,8 @@
             android:layout_height="wrap_content"
             android:layout_gravity="center_vertical|start"
             android:layoutDirection="ltr"
-            android:paddingStart="24dp"
-            android:paddingEnd="24dp"
+            android:paddingStart="48dp"
+            android:paddingEnd="48dp"
             android:importantForAccessibility="noHideDescendants">
 
             <TextView
@@ -57,7 +59,7 @@
             android:layout_gravity="center_vertical|end"
             android:layoutDirection="ltr"
             android:paddingStart="8dp"
-            android:paddingEnd="24dp"
+            android:paddingEnd="48dp"
             android:paddingTop="8dp"
             android:paddingBottom="8dp"
             android:baselineAligned="false"

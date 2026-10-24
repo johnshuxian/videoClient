@@ -1,7 +1,13 @@
 package com.shuxian.videoclient.tv
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.gestures.BringIntoViewSpec
@@ -38,6 +44,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -50,12 +57,16 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -64,10 +75,11 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 private val movieTags = listOf("热门", "最新", "经典", "可播放", "豆瓣高分", "冷门佳片", "华语", "欧美", "韩国", "日本", "动作", "喜剧", "爱情", "科幻", "悬疑", "恐怖", "成长", "动画")
 private val tvTags = listOf("热门", "最新", "国产剧", "港剧", "美剧", "英剧", "日剧", "韩剧", "日本动画", "综艺", "纪录片")
-private val sections = listOf("history" to "播放记录", "movie" to "电影", "tv" to "电视", "variety" to "综艺", "custom" to "自定义")
+private val sections = listOf("history" to "播放记录", "movie" to "电影", "tv" to "电视", "variety" to "综艺", "documentary" to "纪录片", "custom" to "自定义")
 
 @Composable
 internal fun TvBrowseScreen(
@@ -142,11 +154,11 @@ internal fun TvBrowseScreen(
 
     val header: @Composable () -> Unit = {
         Column(Modifier.fillMaxWidth()) {
-            Row(Modifier.fillMaxWidth().padding(top = 18.dp), verticalAlignment = Alignment.CenterVertically,
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                Label("影窗 TV", 27, white, bold = true)
+                Label("影窗 TV", 24, white, bold = true)
                 FocusButton("搜索电影、电视、综艺", icon = R.drawable.tv_search, outlined = true,
-                    modifier = Modifier.widthIn(min = 300.dp)
+                    modifier = Modifier.widthIn(min = 260.dp)
                         .focusRequester(searchFocus).focusProperties {
                         up = FocusRequester.Cancel; down = activeMenu; left = FocusRequester.Cancel; right = settingsFocus
                     }, onFocus = { state.focusHeader(TvHeaderFocus.Search) }, onClick = {
@@ -161,10 +173,10 @@ internal fun TvBrowseScreen(
                         onSettings()
                     })
             }
-            Row(Modifier.padding(top = 24.dp, bottom = 8.dp).focusGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.padding(top = 16.dp, bottom = 8.dp).focusGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 sections.forEachIndexed { index, (value, label) ->
-                    FocusButton(label, selected = section == value, tab = true, fontSize = 24,
-                        modifier = Modifier.focusRequester(menuFocus.getValue(value))
+                    FocusButton(label, selected = section == value, tab = true, fontSize = 20,
+                        modifier = Modifier.height(40.dp).focusRequester(menuFocus.getValue(value))
                             .focusProperties {
                                 up = searchFocus
                                 left = sections.getOrNull(index - 1)?.let { menuFocus.getValue(it.first) } ?: FocusRequester.Cancel
@@ -186,12 +198,6 @@ internal fun TvBrowseScreen(
                 }
             }
             Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFF303036)))
-            if (section != "history") {
-                Label(when (section) {
-                    "movie" -> "电影推荐"; "tv" -> "电视推荐"; "variety" -> "综艺推荐"
-                    else -> "自定义 · ${source?.name ?: "未选择点播源"}"
-                }, 24, white, Modifier.padding(top = 10.dp, bottom = 4.dp), bold = true)
-            }
             if (hasTags) key(section) {
                 val tags = if (section == "movie") movieTags else tvTags
                 TvFilterRow(tags.map { it to it }, tag, tagFocus, activeMenu, onDown = { enterContent() }) {
@@ -252,7 +258,7 @@ private fun TvFilterRow(
 ) {
     // 返回列表时让已选标签从一开始就在横向可视区域，焦点不依赖首屏标签。
     val row = rememberLazyListState(initialFirstVisibleItemIndex = options.indexOfFirst { it.first == selected }.coerceAtLeast(0))
-    LazyRow(state = row, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+    LazyRow(state = row, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.focusGroup()) {
         items(options, key = { it.first }) { (id, label) ->
             FocusButton(label, selected = id == selected, tab = true,
@@ -306,20 +312,20 @@ internal fun TvSearchScreen(
     }
     val header: @Composable () -> Unit = {
         Column(Modifier.fillMaxWidth()) {
-            Row(Modifier.padding(top = 18.dp, bottom = 24.dp), verticalAlignment = Alignment.CenterVertically,
+            Row(Modifier.padding(bottom = 16.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                Label("搜索", 28, white, bold = true)
+                Label("搜索", 24, white, bold = true)
                 Label("影窗 TV", 20, muted)
             }
-            // 搜索区随 24sp 字号加高、加宽，结果区继续保持六列和原有方向键顺序。
+            // 输入框与搜索按钮统一高度，结果区保持六列和原有方向键顺序。
             Row(Modifier.widthIn(max = 600.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                SearchInput(query, onQuery, "输入中文片名", Modifier.weight(1f).height(64.dp)
+                SearchInput(query, onQuery, "输入中文片名", Modifier.weight(1f).height(44.dp)
                     .focusRequester(inputFocus).focusProperties {
                         up = FocusRequester.Cancel; left = FocusRequester.Cancel; right = submitFocus
                     }.onFocusChanged { if (it.isFocused) state.focusHeader(TvHeaderFocus.Search) }, ImeAction.Search,
                     onDown = { enterResults() }, icon = R.drawable.tv_search) { onSearch(query) }
-                FocusButton("搜索", primary = true, modifier = Modifier.width(112.dp).height(64.dp).focusRequester(submitFocus).focusProperties {
+                FocusButton("搜索", primary = true, modifier = Modifier.width(88.dp).height(44.dp).focusRequester(submitFocus).focusProperties {
                     up = FocusRequester.Cancel; left = inputFocus; right = FocusRequester.Cancel
                 }.onPreviewKeyEvent { event ->
                     if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown) {
@@ -482,7 +488,7 @@ private fun TvPosterGrid(
     }
     BoxWithConstraints(modifier.fillMaxWidth()) {
         val posterWidth = with(LocalDensity.current) {
-            (((maxWidth - 84.dp - 16.dp * 5) / TV_POSTER_COLUMNS) - 14.dp).roundToPx().coerceAtLeast(64)
+            (((maxWidth - 96.dp - 16.dp * 5) / TV_POSTER_COLUMNS) - 14.dp).roundToPx().coerceAtLeast(64)
         }
         val visibleKeys by remember(state) { derivedStateOf { state.grid.layoutInfo.visibleItemsInfo.map { it.key }.toSet() } }
         LaunchedEffect(items, posterWidth) {
@@ -499,7 +505,7 @@ private fun TvPosterGrid(
         }
         CompositionLocalProvider(LocalBringIntoViewSpec provides rememberTvListBringIntoViewSpec(state)) {
             LazyVerticalGrid(columns = GridCells.Fixed(TV_POSTER_COLUMNS), state = state.grid, modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 42.dp, vertical = 20.dp),
+                contentPadding = PaddingValues(horizontal = 48.dp, vertical = 24.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
                 item(key = "header", span = { GridItemSpan(maxLineSpan) }, contentType = "header") { header() }
                 itemsIndexed(items, key = { _, item -> item.key }, contentType = { _, _ -> "poster" }) { index, item ->
@@ -575,84 +581,184 @@ private fun TvHistoryList(
     val requesters = remember { mutableMapOf<String, FocusRequester>() }
     val deleteRequesters = remember { mutableMapOf<String, FocusRequester>() }
     val keys = remember(history) { history.map { it.key } }
+    val scope = rememberCoroutineScope()
+    var revealedKey by remember { mutableStateOf<String?>(null) }
+    var deletingKey by remember { mutableStateOf<String?>(null) }
+
+    fun closeDelete() {
+        val key = revealedKey ?: return
+        val index = keys.indexOf(key)
+        if (index >= 0) {
+            // 先覆盖尚未完成的删除焦点请求，再把焦点还给行，最后收起操作区。
+            state.focusPoster(index)
+            requesters[key]?.requestFocus()
+        }
+        revealedKey = null
+    }
+
+    BackHandler(enabled = revealedKey != null || deletingKey != null) {
+        // 删除区打开时，返回不能继续传给页面的回顶/退出逻辑。
+        if (deletingKey == null) closeDelete()
+    }
+    LaunchedEffect(state.focusedKey, state.pendingIndex) {
+        if (state.pendingIndex == null && revealedKey != state.focusedKey && deletingKey == null) revealedKey = null
+    }
     RestoreListFocus(state, keys, requesters, deleteRequesters, columns = 1) {
         state.showHeader(TvHeaderFocus.Menu)
     }
     CompositionLocalProvider(LocalBringIntoViewSpec provides rememberTvListBringIntoViewSpec(state)) {
-        LazyVerticalGrid(columns = GridCells.Fixed(1), state = state.grid, modifier = modifier,
-            contentPadding = PaddingValues(horizontal = 42.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            item(key = "header", contentType = "header") { Column {
-            header()
-            Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Label("播放记录 · ${history.size}", 24, white, Modifier.weight(1f), bold = true)
-                if (history.isNotEmpty()) FocusButton("删除全部", destructive = true,
-                    modifier = Modifier.focusRequester(clearFocus).focusProperties { this.up = up }
-                        .onPreviewKeyEvent { event ->
-                            if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown) { state.enterPosters(keys); true } else false
-                        }, onFocus = { state.focusHeader(TvHeaderFocus.ClearHistory) }, onClick = {
-                            state.leaveFromHeader(TvHeaderFocus.ClearHistory)
-                            onClear()
-                        })
-            }
-            if (history.isEmpty()) Label("还没有播放记录，播放影片后会出现在这里。", 22, muted, Modifier.padding(top = 16.dp))
-            } }
-            itemsIndexed(history, key = { _, entry -> entry.key }, contentType = { _, _ -> "history" }) { index, entry ->
-                val focus = remember { FocusRequester() }
-                val deleteFocus = remember { FocusRequester() }
-                var focused by remember { mutableStateOf(false) }
-                val shape = RoundedCornerShape(10.dp)
-                DisposableEffect(entry.key) {
-                    requesters[entry.key] = focus
-                    deleteRequesters[entry.key] = deleteFocus
-                    onDispose { requesters.remove(entry.key); deleteRequesters.remove(entry.key) }
+        Box(modifier) {
+            LazyVerticalGrid(columns = GridCells.Fixed(1), state = state.grid, modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 48.dp, top = 24.dp, end = 48.dp, bottom = 64.dp)) {
+                item(key = "header", contentType = "header") {
+                    Column(Modifier.padding(bottom = 12.dp)) {
+                        header()
+                        Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Label("播放记录 · ${history.size}", 24, white, Modifier.weight(1f), bold = true)
+                            if (history.isNotEmpty()) FocusButton("删除全部", destructive = true,
+                                modifier = Modifier.focusRequester(clearFocus).focusProperties { this.up = up }
+                                    .onPreviewKeyEvent { event ->
+                                        if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown) { state.enterPosters(keys); true } else false
+                                    }, onFocus = { state.focusHeader(TvHeaderFocus.ClearHistory) }, onClick = {
+                                        state.leaveFromHeader(TvHeaderFocus.ClearHistory)
+                                        onClear()
+                                    })
+                        }
+                        if (history.isEmpty()) Label("还没有播放记录，播放影片后会出现在这里。", 22, muted, Modifier.padding(top = 16.dp))
+                    }
                 }
-                Row(Modifier.fillMaxWidth().onPreviewKeyEvent { event ->
-                    if (event.key == Key.DirectionUp || event.key == Key.DirectionDown ||
-                        event.key == Key.DirectionLeft || event.key == Key.DirectionRight) {
-                        if (event.type == KeyEventType.KeyUp) state.releaseDirectionKey()
-                        if (event.type == KeyEventType.KeyDown &&
-                            state.acceptDirectionKey(event.nativeKeyEvent.repeatCount, event.nativeKeyEvent.eventTime)) {
-                            val fromIndex = state.pendingIndex ?: index
-                            val delete = if (state.pendingIndex != null) state.pendingDelete else state.deleteFocused
-                            when (event.key) {
-                                Key.DirectionLeft -> if (delete) state.focusPoster(fromIndex)
-                                Key.DirectionRight -> if (!delete) state.focusPoster(fromIndex, delete = true)
-                                Key.DirectionUp, Key.DirectionDown -> {
-                                    val direction = if (event.key == Key.DirectionUp) TvGridDirection.Up else TvGridDirection.Down
-                                    val target = state.posterTarget(index, history.size, direction, columns = 1)
-                                    if (target == -1) state.showHeader(TvHeaderFocus.ClearHistory)
-                                    else if (target != fromIndex) state.focusPoster(target, delete)
+                itemsIndexed(history, key = { _, entry -> entry.key }, contentType = { _, _ -> "history" }) { index, entry ->
+                    val focus = remember { FocusRequester() }
+                    val deleteFocus = remember { FocusRequester() }
+                    var focused by remember { mutableStateOf(false) }
+                    var deleteFocused by remember { mutableStateOf(false) }
+                    val revealed = revealedKey == entry.key
+                    val slide = animateFloatAsState(if (revealed) 1f else 0f, tween(200), label = "history delete reveal")
+                    val removal = remember { Animatable(1f) }
+                    val shape = RoundedCornerShape(10.dp)
+                    DisposableEffect(entry.key) {
+                        requesters[entry.key] = focus
+                        onDispose { requesters.remove(entry.key) }
+                    }
+
+                    fun resumeEntry() {
+                        if (revealedKey != null || deletingKey != null) return
+                        state.leaveFromPoster(entry.key)
+                        onOpen(entry)
+                    }
+                    fun deleteEntry() {
+                        if (deletingKey != null) return
+                        deletingKey = entry.key
+                        state.pauseTracking()
+                        scope.launch {
+                            // 高度和透明度共用进度，下方记录随当前行收缩自然补位。
+                            removal.animateTo(0f, tween(180))
+                            onDelete(entry.key)
+                            revealedKey = null
+                            deletingKey = null
+                            if (history.size > 1) state.focusPoster(minOf(index, history.size - 2))
+                            else state.backToTop(TvHeaderFocus.Menu)
+                        }
+                    }
+
+                    Box(Modifier.fillMaxWidth()
+                        .graphicsLayer { alpha = removal.value; clip = true }
+                        .layout { measurable, constraints ->
+                            val placeable = measurable.measure(constraints)
+                            layout(placeable.width, (placeable.height * removal.value).roundToInt()) {
+                                placeable.placeRelative(0, 0)
+                            }
+                        }
+                        // 把行间距也放进收缩区域，删除结束时不会额外跳动一个间距。
+                        .padding(bottom = 12.dp)
+                        .onPreviewKeyEvent { event ->
+                            val code = event.nativeKeyEvent.keyCode
+                            val confirm = code == android.view.KeyEvent.KEYCODE_DPAD_CENTER ||
+                                code == android.view.KeyEvent.KEYCODE_ENTER || code == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER
+                            if (confirm) {
+                                // 同时消费按下和松开，只接受首次按下，避免按住确定后连删或误续播下一行。
+                                if (event.type == KeyEventType.KeyDown && event.nativeKeyEvent.repeatCount == 0 && deletingKey == null) {
+                                    if (revealed && deleteFocused) deleteEntry()
+                                    else if (!revealed) resumeEntry()
+                                }
+                                true
+                            } else if (event.key == Key.DirectionUp || event.key == Key.DirectionDown ||
+                                event.key == Key.DirectionLeft || event.key == Key.DirectionRight) {
+                                if (event.type == KeyEventType.KeyUp) state.releaseDirectionKey()
+                                if (event.type == KeyEventType.KeyDown && deletingKey == null &&
+                                    state.acceptDirectionKey(event.nativeKeyEvent.repeatCount, event.nativeKeyEvent.eventTime)) {
+                                    val fromIndex = state.pendingIndex ?: index
+                                    when (event.key) {
+                                        Key.DirectionLeft -> if (event.nativeKeyEvent.repeatCount == 0) {
+                                            revealedKey = keys.getOrNull(fromIndex)
+                                            state.focusPoster(fromIndex, delete = true)
+                                        }
+                                        Key.DirectionRight -> if (revealedKey != null) closeDelete()
+                                        Key.DirectionUp, Key.DirectionDown -> {
+                                            val direction = if (event.key == Key.DirectionUp) TvGridDirection.Up else TvGridDirection.Down
+                                            val target = state.posterTarget(index, history.size, direction, columns = 1)
+                                            if (revealedKey != null) closeDelete()
+                                            if (target == -1) state.showHeader(TvHeaderFocus.ClearHistory)
+                                            else state.focusPoster(target)
+                                        }
+                                        else -> Unit
+                                    }
+                                }
+                                true
+                            } else false
+                    }) {
+                        // 删除与整行是并列的焦点目标，普通状态下操作区不参与焦点搜索。
+                        if (revealed || slide.value > 0f) {
+                            DisposableEffect(entry.key) {
+                                deleteRequesters[entry.key] = deleteFocus
+                                onDispose { deleteRequesters.remove(entry.key) }
+                            }
+                            Box(Modifier.matchParentSize()) {
+                                Column(Modifier.align(Alignment.CenterEnd).width(104.dp).fillMaxHeight()
+                                    .graphicsLayer { alpha = slide.value }
+                                    .clip(shape).background(if (deleteFocused) Color(0xFFBC3737) else Color(0xFF742C32))
+                                    .border(2.dp, if (deleteFocused) white else Color.Transparent, shape)
+                                    .focusRequester(deleteFocus).focusProperties { canFocus = revealed }
+                                    .onFocusChanged {
+                                        deleteFocused = it.isFocused
+                                        if (it.isFocused) state.posterFocused(entry.key, delete = true)
+                                    }
+                                    .clickable { if (revealed) deleteEntry() }.padding(12.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterVertically)) {
+                                    Image(painterResource(R.drawable.tv_delete), contentDescription = null,
+                                        colorFilter = ColorFilter.tint(white), modifier = Modifier.size(26.dp))
+                                    Label("删除", 18, white, bold = true, maxLines = 1)
                                 }
                             }
                         }
-                        true
-                    } else false
-                }.focusRequester(focus)
-                    .onFocusChanged { focused = it.isFocused; if (it.isFocused) state.posterFocused(entry.key) }
-                    .clip(shape).background(if (focused) white else panel)
-                    .clickable { state.leaveFromPoster(entry.key); onOpen(entry) }.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Poster(entry.item.poster, repository, Modifier.width(80.dp).height(112.dp))
-                    Column(Modifier.weight(1f)) {
-                        Label(entry.item.title, 24, if (focused) focusInk else white, bold = true, maxLines = 1)
-                        Label("${entry.episodeLabel} · ${entry.item.sourceName}", 20, if (focused) Color(0xFF53535E) else muted, Modifier.padding(top = 7.dp), maxLines = 1)
-                        val seconds = entry.positionMs / 1000
-                        Label("看到 %02d:%02d".format(seconds / 60, seconds % 60), 20, if (focused) Color(0xFF9E410C) else accent, Modifier.padding(top = 7.dp))
-                        Box(Modifier.fillMaxWidth().padding(top = 10.dp).height(6.dp).background(Color(0xFF44444B))) {
-                            val progress = if (entry.durationMs > 0) (entry.positionMs.toFloat() / entry.durationMs).coerceIn(0f, 1f) else 0f
-                            Box(Modifier.fillMaxWidth(progress).fillMaxHeight().background(accent))
+                        Row(Modifier.fillMaxWidth()
+                            .graphicsLayer { translationX = -116.dp.toPx() * slide.value }
+                            .focusRequester(focus)
+                            .onFocusChanged { focused = it.isFocused; if (it.isFocused) state.posterFocused(entry.key) }
+                            .clip(shape).background(if (focused) white else panel)
+                            .clickable { if (revealedKey != null) closeDelete() else resumeEntry() }.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Poster(entry.item.poster, repository, Modifier.width(80.dp).height(112.dp))
+                            Column(Modifier.weight(1f)) {
+                                Label(entry.item.title, 24, if (focused) focusInk else white, bold = true, maxLines = 1)
+                                Label("${entry.episodeLabel} · ${entry.item.sourceName}", 20, if (focused) Color(0xFF53535E) else muted, Modifier.padding(top = 7.dp), maxLines = 1)
+                                val seconds = entry.positionMs / 1000
+                                Label("看到 %02d:%02d".format(seconds / 60, seconds % 60), 20, if (focused) Color(0xFF9E410C) else accent, Modifier.padding(top = 7.dp))
+                                Box(Modifier.fillMaxWidth().padding(top = 10.dp).height(6.dp).background(Color(0xFF44444B))) {
+                                    val progress = if (entry.durationMs > 0) (entry.positionMs.toFloat() / entry.durationMs).coerceIn(0f, 1f) else 0f
+                                    Box(Modifier.fillMaxWidth(progress).fillMaxHeight().background(accent))
+                                }
+                            }
                         }
                     }
-                    Label("▶ 继续播放", 24, if (focused) focusInk else white, Modifier.padding(horizontal = 14.dp), bold = true)
-                    FocusButton("删除", destructive = true, modifier = Modifier.focusRequester(deleteFocus),
-                        onFocus = { state.posterFocused(entry.key, delete = true) }, onClick = {
-                            // 删除后保留右侧操作列，最后一条删除后才回到当前菜单。
-                            state.pauseTracking()
-                            onDelete(entry.key)
-                            if (history.size > 1) state.focusPoster(minOf(index, history.size - 2), delete = true)
-                            else state.backToTop(TvHeaderFocus.Menu)
-                        })
                 }
+            }
+            if (history.isNotEmpty()) {
+                Label(if (revealedKey != null) "确定：删除记录　→ / 返回：取消" else "确定：继续播放　←：删除",
+                    14, muted, Modifier.align(Alignment.BottomCenter)
+                        .background(background.copy(alpha = .95f), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 16.dp, vertical = 8.dp), maxLines = 1)
             }
         }
     }

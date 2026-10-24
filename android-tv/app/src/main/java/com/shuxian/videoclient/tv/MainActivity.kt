@@ -59,9 +59,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.Popup
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -88,7 +85,7 @@ class MainActivity : ComponentActivity() {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             hide(WindowInsetsCompat.Type.systemBars())
         }
-        setContent { TvApp(updater, onExit = { finish() }) }
+        setContent { TvScreenLayout { TvApp(updater, onExit = { finish() }) } }
     }
 
     override fun onResume() {
@@ -674,7 +671,7 @@ private fun TvApp(updater: AppUpdater, onExit: () -> Unit) {
             }
             "settings" -> {
                 LazyColumn(state = settingsListState, modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(horizontal = 42.dp, vertical = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    contentPadding = PaddingValues(horizontal = 48.dp, vertical = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     item(key = "settings-header") {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Label("设置", 30, white, Modifier.weight(1f), bold = true)
@@ -882,7 +879,7 @@ private fun TvApp(updater: AppUpdater, onExit: () -> Unit) {
         val prompt = otherSourcePrompt
         if (prompt != null) {
             val label = detail?.lines?.getOrNull(prompt.lineIndex)?.episodes?.getOrNull(prompt.episodeIndex)?.label.orEmpty()
-            Dialog(onDismissRequest = { otherSourcePrompt = null }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            TvDialog(onDismissRequest = { otherSourcePrompt = null }) {
                 Column(
                     Modifier.widthIn(max = 720.dp).fillMaxWidth(.9f).clip(RoundedCornerShape(12.dp)).background(panel).padding(28.dp),
                     verticalArrangement = Arrangement.spacedBy(20.dp),
@@ -907,19 +904,17 @@ private fun TvApp(updater: AppUpdater, onExit: () -> Unit) {
             }
         }
         if (updateMessage.isNotEmpty()) {
-            // 不夺走遥控器焦点，短暂展示结果后自动收起。
-            Popup(alignment = Alignment.Center) {
-                Column(Modifier.width(560.dp).background(panel, RoundedCornerShape(16.dp))
-                    .border(2.dp, if (updateError) danger else accent, RoundedCornerShape(16.dp)).padding(28.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Label("更新提示", 28, if (updateError) danger else white, bold = true)
-                    Label(updateMessage, 22, white)
-                }
+            // 在页面内居中显示，沿用统一密度且不夺走遥控器焦点。
+            Column(Modifier.align(Alignment.Center).width(560.dp).background(panel, RoundedCornerShape(16.dp))
+                .border(2.dp, if (updateError) danger else accent, RoundedCornerShape(16.dp)).padding(28.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Label("更新提示", 28, if (updateError) danger else white, bold = true)
+                Label(updateMessage, 22, white)
             }
         }
         val availableUpdate = updatePrompt
         if (availableUpdate != null) {
-            Dialog(onDismissRequest = { updatePrompt = null; settingsHeaderTarget = settingsVersionFocus }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            TvDialog(onDismissRequest = { updatePrompt = null; settingsHeaderTarget = settingsVersionFocus }) {
                 Column(Modifier.widthIn(max = 720.dp).fillMaxWidth(.9f).clip(RoundedCornerShape(12.dp)).background(panel).padding(28.dp),
                     verticalArrangement = Arrangement.spacedBy(20.dp)) {
                     Label("发现新版本 v${availableUpdate.version}", 28, white, bold = true)
@@ -958,7 +953,7 @@ private fun TvApp(updater: AppUpdater, onExit: () -> Unit) {
             }
         }
         if (confirmClearHistory) {
-            Dialog(onDismissRequest = { browseList.restoreFocus(); confirmClearHistory = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            TvDialog(onDismissRequest = { browseList.restoreFocus(); confirmClearHistory = false }) {
                 Column(
                     Modifier.widthIn(max = 720.dp).fillMaxWidth(.9f).clip(RoundedCornerShape(12.dp)).background(panel).padding(28.dp),
                     verticalArrangement = Arrangement.spacedBy(20.dp),

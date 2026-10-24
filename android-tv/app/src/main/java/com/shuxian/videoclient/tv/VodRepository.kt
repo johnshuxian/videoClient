@@ -120,9 +120,11 @@ class VodRepository {
     }
 
     suspend fun catalog(section: String, tag: String, page: Int): List<CatalogItem> = withContext(Dispatchers.IO) {
-        val type = if (section == "variety") "tv" else section
+        // 顶部的综艺、纪录片入口仍使用电视下对应的小分类。
+        val type = if (section == "variety" || section == "documentary") "tv" else section
         val actualTag = when {
             section == "variety" -> "综艺"
+            section == "documentary" -> "纪录片"
             section == "tv" && tag == "最新" -> "热门"
             else -> tag
         }

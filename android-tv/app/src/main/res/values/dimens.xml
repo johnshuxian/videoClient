@@ -1,8 +1,8 @@
 <resources>
     <!-- XML 与动态添加的播放器控件共用尺寸，保证底栏按钮和文字大小一致。 -->
-    <dimen name="tv_player_control_size">72dp</dimen>
-    <dimen name="tv_player_control_icon_padding">18dp</dimen>
-    <dimen name="tv_player_control_text_size">24sp</dimen>
+    <dimen name="tv_player_control_size">56dp</dimen>
+    <dimen name="tv_player_control_icon_padding">14dp</dimen>
+    <dimen name="tv_player_control_text_size">18sp</dimen>
     <!-- Media3 的隐藏动画和窗口尺寸变化也读取这些值，必须与自定义底栏一致。 -->
     <dimen name="exo_styled_bottom_bar_height">96dp</dimen>
     <dimen name="exo_styled_progress_margin_bottom">88dp</dimen>

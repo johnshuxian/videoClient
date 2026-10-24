@@ -5,6 +5,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -132,7 +133,7 @@ fun FocusButton(
     onFocus: (() -> Unit)? = null,
     primary: Boolean = false,
     destructive: Boolean = false,
-    fontSize: Int = 24,
+    fontSize: Int = 18,
     loading: Boolean = false,
     icon: Int? = null,
     outlined: Boolean = false,
@@ -142,7 +143,7 @@ fun FocusButton(
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val scale = animateFloatAsState(if (pressed) .98f else if (focused) 1.05f else 1f, tween(150), label = "button focus")
-    val shape = RoundedCornerShape(if (tab) 16.dp else 32.dp)
+    val shape = RoundedCornerShape(50)
     val ink = when {
         !enabled -> muted
         focused || primary -> if (destructive) Color(0xFF9C241B) else focusInk
@@ -158,19 +159,19 @@ fun FocusButton(
                 if (enabled && newlyFocused) onFocus?.invoke()
             }
             .graphicsLayer { scaleX = scale.value; scaleY = scale.value }
-            .background(when { focused -> white; primary -> accent; selected -> selectedPanel; else -> panel }, shape)
+            .background(when { focused -> white; primary -> accent; selected -> selectedPanel; tab -> Color.Transparent; else -> panel }, shape)
             .clip(shape)
             // 描边与底色共用缩放层，避免外部固定描边与放大后的圆角错位、露出白边。
             .then(if (outlined) Modifier.border(1.dp, if (focused) white else Color(0xFF63636F), shape) else Modifier)
             .clickable(enabled = enabled, interactionSource = interaction, indication = null) { if (!loading) onClick() }
-            // TV 常规操作使用 24sp，按钮高度同时放大，为字形和焦点缩放留出空间。
-            .heightIn(min = if (tab) 60.dp else 64.dp)
-            .padding(horizontal = if (tab) 20.dp else 24.dp, vertical = 12.dp),
+            // 筛选与操作按钮按层级使用 36/44dp；主菜单在调用处使用 40dp、20sp。
+            .heightIn(min = if (tab) 36.dp else 44.dp)
+            .padding(horizontal = 16.dp, vertical = if (tab) 4.dp else 8.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (loading) LoadingIndicator()
-            else if (icon != null) Image(painterResource(icon), null, colorFilter = ColorFilter.tint(ink), modifier = Modifier.size(28.dp))
+            else if (icon != null) Image(painterResource(icon), null, colorFilter = ColorFilter.tint(ink), modifier = Modifier.size(20.dp))
             Label(label, fontSize, ink, bold = true, maxLines = 1)
         }
     }
@@ -232,12 +233,12 @@ internal fun SearchInput(value: String, onChange: (String) -> Unit, hint: String
             keyboard?.show()
         }
     }
-    val shape = RoundedCornerShape(16.dp)
+    val shape = RoundedCornerShape(12.dp)
     Box(
         // 输入框以描边表达焦点，保持深色底与固定尺寸，避免形成突兀的大块白色区域。
-        modifier.heightIn(min = 64.dp).background(if (focused) Color(0xFF3A3A44) else Color(0xFF303039), shape)
+        modifier.heightIn(min = 44.dp).background(if (focused) Color(0xFF3A3A44) else Color(0xFF303039), shape)
             .border(if (focused) 2.dp else 1.dp, if (focused) white else Color(0xFF63636F), shape)
-            .padding(horizontal = 18.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 8.dp),
         contentAlignment = Alignment.CenterStart,
     ) {
         BasicTextField(
@@ -245,7 +246,7 @@ internal fun SearchInput(value: String, onChange: (String) -> Unit, hint: String
             onValueChange = { fieldValue = it; onChange(it.text) },
             readOnly = !editing,
             singleLine = true,
-            textStyle = TextStyle(color = white, fontSize = 24.sp),
+            textStyle = TextStyle(color = white, fontSize = 18.sp),
             cursorBrush = SolidColor(accent),
             keyboardOptions = KeyboardOptions(imeAction = action, showKeyboardOnFocus = false),
             keyboardActions = KeyboardActions(
@@ -282,10 +283,10 @@ internal fun SearchInput(value: String, onChange: (String) -> Unit, hint: String
                     } else false
                 },
             decorationBox = { input ->
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (icon != null) Image(painterResource(icon), null, colorFilter = ColorFilter.tint(if (focused) white else muted), modifier = Modifier.size(28.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (icon != null) Image(painterResource(icon), null, colorFilter = ColorFilter.tint(if (focused) white else muted), modifier = Modifier.size(20.dp))
                     Box(Modifier.weight(1f)) {
-                        if (value.isEmpty()) Label(hint, 24, Color(0xFFD0D0DA), maxLines = 1)
+                        if (value.isEmpty()) Label(hint, 18, Color(0xFFD0D0DA), maxLines = 1)
                         input()
                     }
                 }
@@ -388,11 +389,12 @@ internal fun PosterCard(title: String, poster: String, subtitle: String, reposit
         Poster(poster, repository, Modifier.fillMaxWidth().aspectRatio(.72f), showLoading = true,
             // 卡片和图片共用 160ms 进度，只在绘制层读取，避免两套动画先后停下。
             imageScale = { 1f + .04f * focusProgress.value }, targetWidth = targetWidth, animateLoading = visible)
-        Spacer(Modifier.height(10.dp))
-        // 固定预留两行片名，放大字号后仍能多显示内容，也保持同一排卡片高度一致。
-        BasicText(title, minLines = 2, maxLines = 2, overflow = TextOverflow.Ellipsis,
-            style = TextStyle(color = if (focused) accent else white, fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold))
+        Spacer(Modifier.height(6.dp))
+        // 仅当前停留的卡片滚动长片名；短片名保持静止，移开焦点后恢复单行省略。
+        BasicText(title, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = if (focused && !movingQuickly) Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 800) else Modifier,
+            style = TextStyle(color = if (focused) accent else white, fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold))
         BasicText(subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            style = TextStyle(color = muted, fontSize = 18.sp, lineHeight = 24.sp), modifier = Modifier.padding(top = 4.dp))
+            style = TextStyle(color = muted, fontSize = 14.sp, lineHeight = 20.sp), modifier = Modifier.padding(top = 2.dp))
     }
 }
