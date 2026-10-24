@@ -190,7 +190,7 @@ internal fun TvBrowseScreen(
                 Label(when (section) {
                     "movie" -> "电影推荐"; "tv" -> "电视推荐"; "variety" -> "综艺推荐"
                     else -> "自定义 · ${source?.name ?: "未选择点播源"}"
-                }, 20, white, Modifier.padding(top = 10.dp, bottom = 4.dp), bold = true)
+                }, 24, white, Modifier.padding(top = 10.dp, bottom = 4.dp), bold = true)
             }
             if (hasTags) key(section) {
                 val tags = if (section == "movie") movieTags else tvTags
@@ -220,9 +220,9 @@ internal fun TvBrowseScreen(
                     }
                 }
             }
-            if (section == "custom" && source == null) Label("请在设置中导入 vod.json 并启用点播源。", 20, muted, Modifier.padding(vertical = 12.dp))
+            if (section == "custom" && source == null) Label("请在设置中导入 vod.json 并启用点播源。", 22, muted, Modifier.padding(vertical = 12.dp))
             if (categoryFailed) Row(verticalAlignment = Alignment.CenterVertically) {
-                Label("分类加载失败：$categoryError", 18, danger, Modifier.weight(1f), maxLines = 1)
+                Label("分类加载失败：$categoryError", 20, danger, Modifier.weight(1f), maxLines = 1)
                 FocusButton("重试分类", modifier = Modifier.focusRequester(categoryRetryFocus)
                     .focusProperties { up = gridUp }.onPreviewKeyEvent { event ->
                         if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown) { enterContent(); true } else false
@@ -309,17 +309,17 @@ internal fun TvSearchScreen(
             Row(Modifier.padding(top = 18.dp, bottom = 24.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(20.dp)) {
                 Label("搜索", 28, white, bold = true)
-                Label("影窗 TV", 18, muted)
+                Label("影窗 TV", 20, muted)
             }
-            // 搜索区靠左，常规电视宽度下输入框 400dp、按钮 96dp；结果仍使用整行六列。
-            Row(Modifier.widthIn(max = 512.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+            // 搜索区随 24sp 字号加高、加宽，结果区继续保持六列和原有方向键顺序。
+            Row(Modifier.widthIn(max = 600.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                SearchInput(query, onQuery, "输入中文片名", Modifier.weight(1f).height(54.dp)
+                SearchInput(query, onQuery, "输入中文片名", Modifier.weight(1f).height(64.dp)
                     .focusRequester(inputFocus).focusProperties {
                         up = FocusRequester.Cancel; left = FocusRequester.Cancel; right = submitFocus
                     }.onFocusChanged { if (it.isFocused) state.focusHeader(TvHeaderFocus.Search) }, ImeAction.Search,
                     onDown = { enterResults() }, icon = R.drawable.tv_search) { onSearch(query) }
-                FocusButton("搜索", primary = true, modifier = Modifier.width(96.dp).height(54.dp).focusRequester(submitFocus).focusProperties {
+                FocusButton("搜索", primary = true, modifier = Modifier.width(112.dp).height(64.dp).focusRequester(submitFocus).focusProperties {
                     up = FocusRequester.Cancel; left = inputFocus; right = FocusRequester.Cancel
                 }.onPreviewKeyEvent { event ->
                     if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown) {
@@ -331,10 +331,10 @@ internal fun TvSearchScreen(
             if (term.isNotEmpty()) {
                 Row(Modifier.fillMaxWidth().padding(top = 22.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Label("“$term” · ${results.size} 个结果", 20, white, Modifier.weight(1f), bold = true, maxLines = 1)
+                    Label("“$term” · ${results.size} 个结果", 24, white, Modifier.weight(1f), bold = true, maxLines = 1)
                     if (total > 0) {
                         val status = when { loading -> "搜索中"; error.isNotEmpty() -> "搜索中断"; else -> "搜索完成" }
-                        Label("$status · $completed / $total 个源", 16, muted)
+                        Label("$status · $completed / $total 个源", 20, muted)
                     }
                 }
                 val message = when {
@@ -344,7 +344,7 @@ internal fun TvSearchScreen(
                     !loading && results.isEmpty() -> if (exact) "片名没有包含完整关键词，可缩短关键词或关闭精确搜索。" else "没有找到相关影片，可以试试其他关键词。"
                     else -> ""
                 }
-                if (message.isNotEmpty()) Label(message, 17, muted, Modifier.padding(top = 8.dp))
+                if (message.isNotEmpty()) Label(message, 20, muted, Modifier.padding(top = 8.dp))
             }
         }
     }
@@ -538,7 +538,7 @@ private fun TvPosterGrid(
                 }
                 if (error.isNotEmpty()) item(key = "error", span = { GridItemSpan(maxLineSpan) }, contentType = "status") {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                        Label(error, 16, Color(0xFFFFA6A6), Modifier.weight(1f), maxLines = 2)
+                        Label(error, 20, Color(0xFFFFA6A6), Modifier.weight(1f), maxLines = 2)
                         FocusButton("重试", tab = true, modifier = Modifier.focusRequester(retryFocus).onPreviewKeyEvent { event ->
                             if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionUp) {
                                 if (items.isEmpty()) state.showHeader(upHeader) else state.focusPoster(items.lastIndex)
@@ -551,7 +551,7 @@ private fun TvPosterGrid(
                         })
                     }
                 } else if (showEmpty && items.isEmpty() && !loading && !hasMore) item(key = "empty", span = { GridItemSpan(maxLineSpan) }) {
-                    Label("暂无影片", 18, muted, Modifier.padding(vertical = 16.dp))
+                    Label("暂无影片", 22, muted, Modifier.padding(vertical = 16.dp))
                 }
             }
         }
@@ -584,7 +584,7 @@ private fun TvHistoryList(
             item(key = "header", contentType = "header") { Column {
             header()
             Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Label("播放记录 · ${history.size}", 22, white, Modifier.weight(1f), bold = true)
+                Label("播放记录 · ${history.size}", 24, white, Modifier.weight(1f), bold = true)
                 if (history.isNotEmpty()) FocusButton("删除全部", destructive = true,
                     modifier = Modifier.focusRequester(clearFocus).focusProperties { this.up = up }
                         .onPreviewKeyEvent { event ->
@@ -594,7 +594,7 @@ private fun TvHistoryList(
                             onClear()
                         })
             }
-            if (history.isEmpty()) Label("还没有播放记录，播放影片后会出现在这里。", 18, muted, Modifier.padding(top = 16.dp))
+            if (history.isEmpty()) Label("还没有播放记录，播放影片后会出现在这里。", 22, muted, Modifier.padding(top = 16.dp))
             } }
             itemsIndexed(history, key = { _, entry -> entry.key }, contentType = { _, _ -> "history" }) { index, entry ->
                 val focus = remember { FocusRequester() }
@@ -630,20 +630,20 @@ private fun TvHistoryList(
                 }.focusRequester(focus)
                     .onFocusChanged { focused = it.isFocused; if (it.isFocused) state.posterFocused(entry.key) }
                     .clip(shape).background(if (focused) white else panel)
-                    .clickable { state.leaveFromPoster(entry.key); onOpen(entry) }.padding(12.dp),
+                    .clickable { state.leaveFromPoster(entry.key); onOpen(entry) }.padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Poster(entry.item.poster, repository, Modifier.width(68.dp).height(94.dp))
+                    Poster(entry.item.poster, repository, Modifier.width(80.dp).height(112.dp))
                     Column(Modifier.weight(1f)) {
-                        Label(entry.item.title, 22, if (focused) focusInk else white, bold = true, maxLines = 1)
-                        Label("${entry.episodeLabel} · ${entry.item.sourceName}", 17, if (focused) Color(0xFF53535E) else muted, Modifier.padding(top = 7.dp), maxLines = 1)
+                        Label(entry.item.title, 24, if (focused) focusInk else white, bold = true, maxLines = 1)
+                        Label("${entry.episodeLabel} · ${entry.item.sourceName}", 20, if (focused) Color(0xFF53535E) else muted, Modifier.padding(top = 7.dp), maxLines = 1)
                         val seconds = entry.positionMs / 1000
-                        Label("看到 %02d:%02d".format(seconds / 60, seconds % 60), 17, if (focused) Color(0xFF9E410C) else accent, Modifier.padding(top = 7.dp))
-                        Box(Modifier.fillMaxWidth().padding(top = 10.dp).height(4.dp).background(Color(0xFF44444B))) {
+                        Label("看到 %02d:%02d".format(seconds / 60, seconds % 60), 20, if (focused) Color(0xFF9E410C) else accent, Modifier.padding(top = 7.dp))
+                        Box(Modifier.fillMaxWidth().padding(top = 10.dp).height(6.dp).background(Color(0xFF44444B))) {
                             val progress = if (entry.durationMs > 0) (entry.positionMs.toFloat() / entry.durationMs).coerceIn(0f, 1f) else 0f
                             Box(Modifier.fillMaxWidth(progress).fillMaxHeight().background(accent))
                         }
                     }
-                    Label("▶ 继续播放", 20, if (focused) focusInk else white, Modifier.padding(horizontal = 14.dp), bold = true)
+                    Label("▶ 继续播放", 24, if (focused) focusInk else white, Modifier.padding(horizontal = 14.dp), bold = true)
                     FocusButton("删除", destructive = true, modifier = Modifier.focusRequester(deleteFocus),
                         onFocus = { state.posterFocused(entry.key, delete = true) }, onClick = {
                             // 删除后保留右侧操作列，最后一条删除后才回到当前菜单。

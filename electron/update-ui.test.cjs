@@ -28,6 +28,9 @@ if (process.versions.electron) {
         await window.webContents.executeJavaScript('document.querySelector(".update-modal .load-more").click()');
         await new Promise(resolve => setTimeout(resolve, 200));
         await fs.writeFile(path.join(process.env.UPDATE_UI_CAPTURE_DIR, "update-settings.png"), (await window.webContents.capturePage()).toPNG());
+        await window.webContents.executeJavaScript('window.previewUpdateResult()');
+        await new Promise(resolve => setTimeout(resolve, 200));
+        await fs.writeFile(path.join(process.env.UPDATE_UI_CAPTURE_DIR, "update-result.png"), (await window.webContents.capturePage()).toPNG());
       }
       process.stdout.write(`UPDATE_UI_RESULT=${JSON.stringify(result)}\n`);
       app.exit(0);
@@ -76,6 +79,7 @@ if (process.versions.electron) {
               }
               const clickVersion = () => document.querySelector(".settings-version-button").click();
               const dialogButton = label => [...document.querySelectorAll(".update-modal button")].find(button => button.textContent === label);
+              window.previewUpdateResult = () => { mode = "current"; clickVersion(); };
               window.updateUiTest = async () => {
                 const results = {};
                 await until(() => document.querySelector('[aria-label="播放设置"]'), "设置入口");
@@ -101,18 +105,23 @@ if (process.versions.electron) {
                 dialogButton("同意").click();
                 await until(() => installs === 1, "触发安装接口");
                 progress(75);
-                await until(() => document.querySelector('[role="status"]').textContent.includes("75%"), "下载进度");
+                await until(() => document.querySelector('[role="status"]')?.textContent.includes("75%"), "下载进度");
                 results.downloadLocksControls = select.disabled && document.querySelector(".settings-version-button").disabled;
                 finishInstall({ status: "started" });
-                await until(() => document.querySelector('[role="status"]').textContent.includes("安装程序已打开"), "安装提示");
+                await until(() => document.querySelector('[role="status"]')?.textContent.includes("安装程序已打开"), "安装提示");
                 results.agreeInstallsOnce = installs === 1;
                 mode = "current";
                 clickVersion();
-                await until(() => document.querySelector('[role="status"]').textContent.includes("当前已是最新版本"), "最新版本提示");
+                await until(() => document.querySelector('[role="status"]')?.textContent.includes("当前已是最新版本"), "最新版本提示");
                 results.noUpdateNoDialog = !document.querySelector(".update-modal");
+                results.latestResultIsPopup = !!document.querySelector(".update-result-backdrop .update-result-popup");
+                results.noInlineResult = !document.querySelector(".settings-update-status");
+                await wait(2200);
+                results.resultDismissesAfterTwoSeconds = !document.querySelector(".update-result-popup");
                 mode = "error";
                 clickVersion();
-                await until(() => document.querySelector('[role="status"]').textContent.includes("测试网络错误"), "网络错误提示");
+                await until(() => document.querySelector('[role="status"]')?.textContent.includes("测试网络错误"), "网络错误提示");
+                results.errorResultIsPopup = !!document.querySelector(".update-result-popup.is-error");
                 results.failureUnlocksControls = !select.disabled && !document.querySelector(".settings-version-button").disabled;
                 mode = "update";
                 clickVersion();

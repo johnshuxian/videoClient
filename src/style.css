@@ -1760,7 +1760,20 @@ html[data-harmony="true"] .art-video-player.art-fullscreen-web .art-bottom {
 .update-route-row option { background: #202025; color: #f7f7f9; }
 .light .update-route-row option { background: #fff; color: #17171c; }
 .settings-update-status { color: #9b9ca5; font-size: 12px; line-height: 1.6; }
-.settings-update-status.is-error { color: #db6b60; }
+.update-result-backdrop { z-index: 70; pointer-events: none; }
+/* 结果提示采用紧凑横排，较长的错误信息按最大宽度换行。 */
+.modal-backdrop .cast-modal.update-result-popup {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: fit-content;
+  max-width: min(320px, calc(100vw - 32px));
+  padding: 14px 18px;
+  border-radius: 12px;
+}
+.update-result-popup > svg { color: #55a77a; flex-shrink: 0; }
+.update-result-popup.is-error > svg { color: #db6b60; }
+.cast-modal.update-result-popup > p { font-size: 13px; line-height: 1.5; margin: 0; overflow-wrap: anywhere; }
 .update-backdrop { z-index: 60; }
 .update-notes {
   max-height: 200px;

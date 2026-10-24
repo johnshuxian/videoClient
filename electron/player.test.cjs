@@ -220,7 +220,25 @@ if (process.versions.electron) {
                     noFailure: failures === 0,
                     active: Artplayer.instances.length === 0,
                   });
+                  let endedFullscreen;
+                  props.onEnded = fullscreen => { endedFullscreen = fullscreen; };
                   const first = await mount(firstUrl);
+                  first.fullscreenWeb = true;
+                  first.video.dispatchEvent(new Event("ended"));
+                  await until(() => !first.fullscreenWeb, "最后一集结束后退出全屏");
+                  results.push({ name: "最后一集全屏结束返回详情", exited: !first.fullscreenWeb, notified: endedFullscreen === true });
+                  props.hasNextEpisode = true;
+                  render(firstUrl);
+                  await until(() => first.template.$player.classList.contains("has-next-episode"));
+                  first.fullscreenWeb = true;
+                  first.video.dispatchEvent(new Event("ended"));
+                  results.push({ name: "有下一集时保留全屏连播", fullscreen: first.fullscreenWeb, notified: endedFullscreen === true });
+                  first.fullscreenWeb = false;
+                  props.hasNextEpisode = false;
+                  render(firstUrl);
+                  await until(() => !first.template.$player.classList.contains("has-next-episode"));
+                  first.video.dispatchEvent(new Event("ended"));
+                  results.push({ name: "非全屏结束保持当前详情", inline: !first.fullscreenWeb, notified: endedFullscreen === false });
                   // 在错误重连等待期间退出，然后立即播放另一部视频。
                   first.video.dispatchEvent(new Event("error"));
                   root.unmount();
@@ -276,6 +294,23 @@ if (process.versions.electron) {
                     stopped: third.video.paused && !third.video.getAttribute("src"),
                     active: Artplayer.instances.length === 0 && playerInstance.current === null,
                   });
+                  // 手机与鸿蒙共用网页全屏，但退出时还必须恢复各自的系统栏状态。
+                  window.videoAPI.platform = "android";
+                  window.videoAPI.streamUrl = async url => ({ url, isHls: false });
+                  for (const platform of ["Android", "HarmonyOS"]) {
+                    document.documentElement.dataset.harmony = String(platform === "HarmonyOS");
+                    const fullscreenChanges = [];
+                    window.videoAPI.setVideoFullscreen = fullscreen => fullscreenChanges.push(fullscreen);
+                    const mobile = await mount(firstUrl);
+                    mobile.fullscreenWeb = true;
+                    mobile.video.dispatchEvent(new Event("ended"));
+                    await until(() => !mobile.fullscreenWeb, platform + " 最后一集返回详情");
+                    results.push({ name: platform + " 最后一集恢复系统栏",
+                      exited: !mobile.fullscreenWeb, restored: fullscreenChanges.at(-1) === false,
+                      notified: endedFullscreen === true,
+                    });
+                    root.unmount();
+                  }
                   return results;
                 }};
               </script>

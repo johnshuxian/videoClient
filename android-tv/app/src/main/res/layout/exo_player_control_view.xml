@@ -3,21 +3,25 @@
 <merge xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
-    <View
+    <!-- Media3 会把背景容器铺满屏幕；渐变只放在容器底部，避免整幅画面出现阴影。 -->
+    <FrameLayout
         android:id="@id/exo_controls_background"
         android:layout_width="match_parent"
-        android:layout_height="224dp"
-        android:layout_gravity="bottom"
-        android:background="@drawable/tv_player_scrim" />
+        android:layout_height="match_parent">
+        <View android:layout_width="match_parent" android:layout_height="224dp"
+            android:layout_gravity="bottom" android:background="@drawable/tv_player_scrim" />
+    </FrameLayout>
 
     <FrameLayout
         android:id="@id/exo_bottom_bar"
         android:layout_width="match_parent"
-        android:layout_height="96dp"
+        android:layout_height="@dimen/exo_styled_bottom_bar_height"
         android:layout_marginTop="@dimen/exo_styled_bottom_bar_margin_top"
         android:layout_gravity="bottom"
         android:background="@android:color/transparent"
-        android:layoutDirection="ltr">
+        android:layoutDirection="ltr"
+        android:clipChildren="false"
+        android:clipToPadding="false">
 
         <LinearLayout
             android:id="@id/exo_time"
@@ -54,6 +58,10 @@
             android:layoutDirection="ltr"
             android:paddingStart="8dp"
             android:paddingEnd="24dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp"
+            android:baselineAligned="false"
+            android:clipChildren="false"
             android:clipToPadding="false">
 
             <ImageButton android:id="@id/exo_vr" style="@style/ExoStyledControls.Button.Bottom.VR" />
@@ -70,6 +78,8 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="center_vertical|end"
+            android:clipChildren="false"
+            android:clipToPadding="false"
             android:visibility="invisible">
 
             <LinearLayout
@@ -77,7 +87,12 @@
                 android:orientation="horizontal"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layoutDirection="ltr">
+                android:layoutDirection="ltr"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp"
+                android:baselineAligned="false"
+                android:clipChildren="false"
+                android:clipToPadding="false">
 
                 <ImageButton android:id="@id/exo_overflow_hide" style="@style/ExoStyledControls.Button.Bottom.OverflowHide" />
             </LinearLayout>
@@ -89,7 +104,7 @@
         android:layout_width="match_parent"
         android:layout_height="48dp"
         android:layout_gravity="bottom"
-        android:layout_marginBottom="88dp"
+        android:layout_marginBottom="@dimen/exo_styled_progress_margin_bottom"
         app:bar_height="6dp"
         app:touch_target_height="48dp"
         app:scrubber_enabled_size="16dp"

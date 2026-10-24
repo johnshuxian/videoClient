@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -59,6 +60,8 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.Popup
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -140,6 +143,12 @@ private fun TvApp(updater: AppUpdater, onExit: () -> Unit) {
     var updatePercent by remember { mutableIntStateOf(0) }
     var updateMessage by remember { mutableStateOf("") }
     var updateError by remember { mutableStateOf(false) }
+    LaunchedEffect(updateMessage, updateBusy) {
+        if (updateMessage.isNotEmpty() && updateBusy.isEmpty()) {
+            delay(2000)
+            updateMessage = ""
+        }
+    }
     // 保留源返回的全部结果，设置切换后搜索页可立即更新。
     val visibleSearchResults = remember(searchResults, exactSearch, searchKeyword) {
         val visible = if (exactSearch && searchKeyword.isNotEmpty()) {
@@ -630,9 +639,9 @@ private fun TvApp(updater: AppUpdater, onExit: () -> Unit) {
                     Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
                         LoadingIndicator()
                         Spacer(Modifier.height(12.dp))
-                        Label("加载中", 22, white)
+                        Label("加载中", 24, white)
                         Spacer(Modifier.height(8.dp))
-                        Label(streamStatus, 16, muted)
+                        Label(streamStatus, 20, muted)
                     }
                 }
             }
@@ -648,7 +657,7 @@ private fun TvApp(updater: AppUpdater, onExit: () -> Unit) {
                         },
                         onSearch = { search(current.title) }, onSort = { episodeDescending = it }, onEpisode = { play(it, lineIndex) })
                 }
-                if (detail == null && detailError.isNotEmpty()) Label(detailError, 20, danger, Modifier.padding(42.dp))
+                if (detail == null && detailError.isNotEmpty()) Label(detailError, 22, danger, Modifier.padding(42.dp))
                 // 各入口进入详情时，加载提示都相对整屏居中。
                 if (detailLoading) {
                     Row(
@@ -659,7 +668,7 @@ private fun TvApp(updater: AppUpdater, onExit: () -> Unit) {
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         LoadingIndicator()
-                        Label("加载中...", 18, white)
+                        Label("加载中...", 24, white)
                     }
                 }
             }
@@ -669,7 +678,7 @@ private fun TvApp(updater: AppUpdater, onExit: () -> Unit) {
                     item(key = "settings-header") {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Label("设置", 30, white, Modifier.weight(1f), bold = true)
-                            FocusButton("v$currentVersion", fontSize = 18, loading = updateBusy.isNotEmpty(),
+                            FocusButton("v$currentVersion", loading = updateBusy.isNotEmpty(),
                                 modifier = Modifier.focusRequester(settingsVersionFocus).onPreviewKeyEvent { event ->
                                     if (event.key == Key.DirectionDown) {
                                         if (event.type == KeyEventType.KeyDown) settingsHeaderTarget = settingsImportFocus
@@ -678,12 +687,12 @@ private fun TvApp(updater: AppUpdater, onExit: () -> Unit) {
                                 }, onClick = {
                                     if (updateBusy.isNotEmpty()) return@FocusButton
                                     updateBusy = "checking"
-                                    updateMessage = "正在检查更新…"
+                                    updateMessage = ""
                                     updateError = false
                                     scope.launch {
                                         try {
                                             updatePrompt = withContext(Dispatchers.IO) { updater.check(updateRoute) }
-                                            updateMessage = if (updatePrompt == null) "当前已是最新版本" else "发现新版本"
+                                            updateMessage = if (updatePrompt == null) "当前已是最新版本" else ""
                                         } catch (cancelled: CancellationException) { throw cancelled }
                                         catch (error: Exception) {
                                             updateError = true
@@ -696,7 +705,7 @@ private fun TvApp(updater: AppUpdater, onExit: () -> Unit) {
                     // 分成独立的焦点行，让懒列表能逐行发现屏幕上方的控件。
                     item(key = "settings-subscription") { Column {
                         Spacer(Modifier.height(12.dp))
-                        Label("vod.json 订阅地址", 18, white)
+                        Label("vod.json 订阅地址", 24, white)
                         Spacer(Modifier.height(10.dp))
                         Row(Modifier.onPreviewKeyEvent { event ->
                             if (event.key == Key.DirectionUp) {
@@ -732,12 +741,12 @@ private fun TvApp(updater: AppUpdater, onExit: () -> Unit) {
                                 }
                             })
                         }
-                        if (settingsError.isNotEmpty()) Label(settingsError, 16, Color(0xFFFFA6A6), Modifier.padding(top = 10.dp))
-                        if (settingsMessage.isNotEmpty()) Label(settingsMessage, 16, accent, Modifier.padding(top = 10.dp))
+                        if (settingsError.isNotEmpty()) Label(settingsError, 20, Color(0xFFFFA6A6), Modifier.padding(top = 10.dp))
+                        if (settingsMessage.isNotEmpty()) Label(settingsMessage, 20, accent, Modifier.padding(top = 10.dp))
                     } }
                     item(key = "settings-search") { Column {
                         Spacer(Modifier.height(12.dp))
-                        Label("搜索", 20, white, bold = true)
+                        Label("搜索", 24, white, bold = true)
                         Spacer(Modifier.height(10.dp))
                         TvSwitchRow("精确搜索", "仅显示片名包含第一段关键词的结果", exactSearch,
                             modifier = Modifier.focusRequester(settingsSearchFocus).onPreviewKeyEvent { event ->
@@ -750,8 +759,8 @@ private fun TvApp(updater: AppUpdater, onExit: () -> Unit) {
                                 settings.exactSearch = exactSearch
                         }
                         Spacer(Modifier.height(16.dp))
-                        Label("线路选择", 20, white, bold = true)
-                        Label("用于检查更新和下载安装包", 16, muted, Modifier.padding(top = 6.dp, bottom = 10.dp))
+                        Label("线路选择", 24, white, bold = true)
+                        Label("用于检查更新和下载安装包", 20, muted, Modifier.padding(top = 6.dp, bottom = 10.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             FocusButton("gh-proxy", selected = updateRoute == "gh-proxy", enabled = updateBusy.isEmpty(),
                                 modifier = Modifier.focusRequester(settingsRouteFocus), onClick = {
@@ -765,15 +774,15 @@ private fun TvApp(updater: AppUpdater, onExit: () -> Unit) {
                                 updateMessage = ""
                             })
                         }
-                        if (updateMessage.isNotEmpty() || updateBusy == "downloading") {
-                            Label(if (updateBusy == "downloading") "正在下载更新 $updatePercent%（完成后打开安装程序）" else updateMessage,
-                                16, if (updateError) danger else muted, Modifier.padding(top = 10.dp))
+                        if (updateBusy == "downloading") {
+                            Label("正在下载更新 $updatePercent%（完成后打开安装程序）",
+                                20, muted, Modifier.padding(top = 10.dp))
                         }
                     } }
                     item(key = "settings-sources-header") { Column {
                         Spacer(Modifier.height(8.dp))
-                        Label("点播源 · ${sources.count { it.enabled }} 个已启用", 20, white, bold = true)
-                        Label("成人源可启用并在“自定义”中浏览，不参与搜索。", 15, muted, Modifier.padding(top = 6.dp, bottom = 14.dp))
+                        Label("点播源 · ${sources.count { it.enabled }} 个已启用", 24, white, bold = true)
+                        Label("成人源可启用并在“自定义”中浏览，不参与搜索。", 20, muted, Modifier.padding(top = 6.dp, bottom = 14.dp))
                     } }
                     itemsIndexed(sources, key = { _, source -> source.url }) { index, source ->
                         Row(
@@ -783,17 +792,17 @@ private fun TvApp(updater: AppUpdater, onExit: () -> Unit) {
                                         if (updateBusy.isEmpty()) settingsRouteFocus else settingsVersionFocus
                                     true
                                 } else false
-                            }.background(panel, RoundedCornerShape(12.dp)).padding(12.dp),
+                            }.background(panel, RoundedCornerShape(16.dp)).padding(16.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
                             Column(Modifier.weight(1f)) {
-                                Label(source.name, 20, white, bold = true, maxLines = 1)
-                                Label(source.url, 15, muted, maxLines = 1)
+                                Label(source.name, 24, white, bold = true, maxLines = 1)
+                                Label(source.url, 18, muted, maxLines = 1)
                             }
-                            if (source.isAdult) Label("成人源", 14, muted)
-                            // 状态和焦点分别呈现，两列操作保持固定宽度。
-                            FocusButton(if (source.enabled) "✓ 已启用" else "启用", selected = source.enabled, tab = true, modifier = Modifier.width(150.dp), onClick = {
+                            if (source.isAdult) Label("成人源", 18, muted)
+                            // 两列操作随 24sp 字号加宽，完整容纳启用状态和“设为自定义源”。
+                            FocusButton(if (source.enabled) "✓ 已启用" else "启用", selected = source.enabled, tab = true, modifier = Modifier.width(168.dp), onClick = {
                                 sources = sources.map { if (it.url == source.url) it.copy(enabled = !it.enabled) else it }
                                 settings.sources = sources
                                 val chosen = sources.firstOrNull { it.url == selectedSourceUrl && it.enabled }
@@ -802,7 +811,7 @@ private fun TvApp(updater: AppUpdater, onExit: () -> Unit) {
                                 settings.selectedSourceUrl = selectedSourceUrl
                                 categoryId = null
                             })
-                            FocusButton(if (selectedSource?.url == source.url) "✓ 自定义源" else "设为自定义源", selected = selectedSource?.url == source.url, enabled = source.enabled, tab = true, modifier = Modifier.width(190.dp), onClick = {
+                            FocusButton(if (selectedSource?.url == source.url) "✓ 自定义源" else "设为自定义源", selected = selectedSource?.url == source.url, enabled = source.enabled, tab = true, modifier = Modifier.width(224.dp), onClick = {
                                 selectedSourceUrl = source.url
                                 settings.selectedSourceUrl = source.url
                                 categoryId = null
@@ -867,19 +876,19 @@ private fun TvApp(updater: AppUpdater, onExit: () -> Unit) {
                     .border(2.dp, accent, RoundedCornerShape(12.dp))
                     .padding(horizontal = 24.dp, vertical = 14.dp),
             ) {
-                Label("再按一次返回键退出", 18, white, bold = true)
+                Label("再按一次返回键退出", 24, white, bold = true)
             }
         }
         val prompt = otherSourcePrompt
         if (prompt != null) {
             val label = detail?.lines?.getOrNull(prompt.lineIndex)?.episodes?.getOrNull(prompt.episodeIndex)?.label.orEmpty()
-            Dialog(onDismissRequest = { otherSourcePrompt = null }) {
+            Dialog(onDismissRequest = { otherSourcePrompt = null }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
                 Column(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(panel).padding(28.dp),
+                    Modifier.widthIn(max = 720.dp).fillMaxWidth(.9f).clip(RoundedCornerShape(12.dp)).background(panel).padding(28.dp),
                     verticalArrangement = Arrangement.spacedBy(20.dp),
                 ) {
-                    Label("发现其它源播放记录", 24, white, bold = true)
-                    Label("${prompt.entry.item.sourceName.ifBlank { prompt.entry.item.sourceUrl }} 曾播放到 $label（约 ${prompt.entry.positionMs / 60_000} 分钟）。是否从当前源继续播放？", 17, muted)
+                    Label("发现其它源播放记录", 28, white, bold = true)
+                    Label("${prompt.entry.item.sourceName.ifBlank { prompt.entry.item.sourceUrl }} 曾播放到 $label（约 ${prompt.entry.positionMs / 60_000} 分钟）。是否从当前源继续播放？", 20, muted)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End)) {
                         FocusButton("暂不恢复", onClick = { otherSourcePrompt = null })
                         FocusButton("恢复播放记录", primary = true, icon = R.drawable.tv_player_play,
@@ -897,14 +906,25 @@ private fun TvApp(updater: AppUpdater, onExit: () -> Unit) {
                 LaunchedEffect(prompt) { confirmOtherSourceFocus.requestFocus() }
             }
         }
+        if (updateMessage.isNotEmpty()) {
+            // 不夺走遥控器焦点，短暂展示结果后自动收起。
+            Popup(alignment = Alignment.Center) {
+                Column(Modifier.width(560.dp).background(panel, RoundedCornerShape(16.dp))
+                    .border(2.dp, if (updateError) danger else accent, RoundedCornerShape(16.dp)).padding(28.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Label("更新提示", 28, if (updateError) danger else white, bold = true)
+                    Label(updateMessage, 22, white)
+                }
+            }
+        }
         val availableUpdate = updatePrompt
         if (availableUpdate != null) {
-            Dialog(onDismissRequest = { updatePrompt = null; settingsHeaderTarget = settingsVersionFocus }) {
-                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(panel).padding(28.dp),
+            Dialog(onDismissRequest = { updatePrompt = null; settingsHeaderTarget = settingsVersionFocus }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+                Column(Modifier.widthIn(max = 720.dp).fillMaxWidth(.9f).clip(RoundedCornerShape(12.dp)).background(panel).padding(28.dp),
                     verticalArrangement = Arrangement.spacedBy(20.dp)) {
-                    Label("发现新版本 v${availableUpdate.version}", 24, white, bold = true)
-                    Label("是否下载更新？安装包约 %.1f MB，下载完成后将打开安装程序。".format(availableUpdate.size / 1024.0 / 1024.0), 18, muted)
-                    if (availableUpdate.notes.isNotBlank()) Label(availableUpdate.notes, 16, muted, maxLines = 5)
+                    Label("发现新版本 v${availableUpdate.version}", 28, white, bold = true)
+                    Label("是否下载更新？安装包约 %.1f MB，下载完成后将打开安装程序。".format(availableUpdate.size / 1024.0 / 1024.0), 20, muted)
+                    if (availableUpdate.notes.isNotBlank()) Label(availableUpdate.notes, 20, muted, maxLines = 5)
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         FocusButton("取消", modifier = Modifier.focusRequester(cancelUpdateFocus), onClick = {
                             updatePrompt = null
@@ -938,13 +958,13 @@ private fun TvApp(updater: AppUpdater, onExit: () -> Unit) {
             }
         }
         if (confirmClearHistory) {
-            Dialog(onDismissRequest = { browseList.restoreFocus(); confirmClearHistory = false }) {
+            Dialog(onDismissRequest = { browseList.restoreFocus(); confirmClearHistory = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
                 Column(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(panel).padding(28.dp),
+                    Modifier.widthIn(max = 720.dp).fillMaxWidth(.9f).clip(RoundedCornerShape(12.dp)).background(panel).padding(28.dp),
                     verticalArrangement = Arrangement.spacedBy(20.dp),
                 ) {
-                    Label("删除全部播放记录？", 24, white, bold = true)
-                    Label("这会同时清除所有影片的续播进度。", 17, muted)
+                    Label("删除全部播放记录？", 28, white, bold = true)
+                    Label("这会同时清除所有影片的续播进度。", 20, muted)
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         FocusButton("取消", modifier = Modifier.focusRequester(cancelClearHistoryFocus), onClick = {
                             browseList.restoreFocus()

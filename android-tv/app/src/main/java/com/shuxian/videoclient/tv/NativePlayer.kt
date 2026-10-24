@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.media.AudioManager
 import android.net.Uri
+import android.os.SystemClock
 import android.provider.Settings
 import android.text.format.DateUtils
 import android.view.GestureDetector
@@ -118,7 +119,7 @@ fun NativePlayer(
     var wasPlayingBeforeHold by remember(url) { mutableStateOf(false) }
     var seekActivity by remember(url) { mutableIntStateOf(0) }
     var seekStartPositionMs by remember(url) { mutableLongStateOf(-1L) }
-    var lastRemoteSeekMs by remember(url) { mutableLongStateOf(0L) }
+    var remoteSeeking by remember(url) { mutableStateOf(false) }
     var popupReturnTag by remember(url) { mutableStateOf<String?>(null) }
     var playerView by remember(url) { mutableStateOf<PlayerView?>(null) }
     var restoringEpisodes by remember(url) { mutableStateOf(false) }
@@ -139,8 +140,8 @@ fun NativePlayer(
         val mediaSource = DefaultMediaSourceFactory(context).setDataSourceFactory(dataSource)
         ExoPlayer.Builder(context)
             .setMediaSourceFactory(mediaSource)
-            .setSeekBackIncrementMs(20_000)
-            .setSeekForwardIncrementMs(20_000)
+            .setSeekBackIncrementMs(10_000)
+            .setSeekForwardIncrementMs(10_000)
             .build().apply {
                 val item = MediaItem.Builder().setUri(url)
                 if (Regex("\\.m3u8(?:$|[?#])", RegexOption.IGNORE_CASE).containsMatchIn(url)) {
@@ -158,6 +159,7 @@ fun NativePlayer(
                 playWhenReady = lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
             }
     }
+    val remoteSeek = remember(player) { TvRemoteSeek(player) }
     val originalBrightness = remember(player) { activity.window.attributes.screenBrightness }
 
     LaunchedEffect(player, playbackSpeed) { player.setPlaybackSpeed(playbackSpeed) }
@@ -175,6 +177,16 @@ fun NativePlayer(
         }
     }
 
+    fun finishRemoteSeek(commit: Boolean, resume: Boolean = true, atMs: Long = SystemClock.uptimeMillis()) {
+        if (!remoteSeek.isActive) return
+        seekFeedback = ""
+        remoteSeek.finish(atMs, commit, resume)
+        remoteSeeking = false
+        playerView?.controllerShowTimeoutMs = 5_000
+        playerView?.findViewById<androidx.media3.ui.DefaultTimeBar>(androidx.media3.ui.R.id.exo_progress)
+            ?.setPosition(player.currentPosition)
+    }
+
     fun openEpisodeMenu() {
         // 每次打开都定位当前播放集；播放线路只由失败自动切换逻辑管理。
         restoringEpisodes = true
@@ -185,9 +197,21 @@ fun NativePlayer(
 
     fun handlePlaybackKey(event: KeyEvent): Boolean {
         if (showEpisodes || showSpeedMenu) return false
+        val seekKey = event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT || event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT ||
+            event.keyCode == KeyEvent.KEYCODE_MEDIA_REWIND || event.keyCode == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD
+        if (remoteSeeking && !seekKey && event.action == KeyEvent.ACTION_DOWN) {
+            // 返回只取消预览；其它操作也先结束预览，避免丢失松键事件后一直快进。
+            finishRemoteSeek(commit = false)
+            if (event.keyCode == KeyEvent.KEYCODE_BACK) return true
+        }
         when (event.keyCode) {
             KeyEvent.KEYCODE_MEDIA_REWIND, KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
             KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                // 松键按发起预览时的按键认领，焦点变化也不能遗失最后一次提交。
+                if (event.action == KeyEvent.ACTION_UP && remoteSeek.keyCode == event.keyCode) {
+                    finishRemoteSeek(commit = !event.isCanceled, atMs = event.eventTime)
+                    return true
+                }
                 val isDpad = event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT || event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT
                 if (isDpad && playerView?.isControllerFullyVisible == true) {
                     val focusedView = playerView?.findFocus()
@@ -195,18 +219,12 @@ fun NativePlayer(
                     // 底栏按钮继续用左右键移动焦点；进度条由这里统一控制跳转频率。
                     if (focusedView != null && focusedView !== playerView && focusedView !== progress) return false
                 }
-                if (event.action == KeyEvent.ACTION_DOWN &&
-                    (event.repeatCount == 0 || event.eventTime - lastRemoteSeekMs >= 600L)
-                ) {
-                    val forward = event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT || event.keyCode == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD
-                    if (event.repeatCount == 0) {
-                        if (forward) player.seekForward() else player.seekBack()
-                    } else {
-                        // 长按时减小步长，避免系统高频连发把影片瞬间跳到末尾。
-                        val target = (player.currentPosition + if (forward) 10_000L else -10_000L).coerceAtLeast(0L)
-                        player.seekTo(if (player.duration > 0L) target.coerceAtMost(player.duration) else target)
-                    }
-                    lastRemoteSeekMs = event.eventTime
+                if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0 && remoteSeek.keyCode != event.keyCode) {
+                    stopFastForward()
+                    remoteSeek.start(event.keyCode, event.eventTime)
+                    remoteSeeking = true
+                    // 长按预览时保留已打开的进度条，松手后恢复自动隐藏。
+                    playerView?.controllerShowTimeoutMs = 0
                 }
                 return true
             }
@@ -304,8 +322,10 @@ fun NativePlayer(
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
                 buffering = playbackState == Player.STATE_BUFFERING
-                // Media3 播放完当前集后，沿用手动“下一集”的切集流程。
-                if (playbackState == Player.STATE_ENDED && hasNext) onNextEpisode()
+                if (playbackState == Player.STATE_ENDED) {
+                    // 有下一集时继续连播；最后一集或电影结束后回到详情并释放播放器。
+                    if (hasNext) onNextEpisode() else onBack()
+                }
             }
             override fun onPlayerError(error: PlaybackException) {
                 onPlaybackFailure(error.message ?: "当前线路播放失败", player.currentPosition)
@@ -333,6 +353,7 @@ fun NativePlayer(
         }
         view.keepScreenOn = true
         onDispose {
+            finishRemoteSeek(commit = false, resume = false)
             stopFastForward()
             view.keepScreenOn = false
             activity.window.attributes = activity.window.attributes.apply { screenBrightness = originalBrightness }
@@ -345,6 +366,7 @@ fun NativePlayer(
         // 电视切到桌面、其他应用或系统界面时立即暂停；返回应用后由用户主动继续播放。
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_PAUSE) {
+                finishRemoteSeek(commit = false, resume = false)
                 reportPosition()
                 stopFastForward()
                 player.pause()
@@ -359,7 +381,8 @@ fun NativePlayer(
         showSpeedMenu = false
     }
     BackHandler(!showEpisodes && !showSpeedMenu) {
-        if (controllerVisible) playerView?.hideController()
+        if (remoteSeeking) finishRemoteSeek(commit = false)
+        else if (controllerVisible) playerView?.hideController()
         else { reportPosition(); onBack() }
     }
     LaunchedEffect(showEpisodes, playerView) {
@@ -389,11 +412,23 @@ fun NativePlayer(
             showPlayFeedback = false
         }
     }
-    LaunchedEffect(seekActivity) {
-        if (seekActivity > 0) {
+    LaunchedEffect(seekActivity, remoteSeeking) {
+        if (seekActivity > 0 && !remoteSeeking) {
             delay(1_800)
             seekFeedback = ""
             seekStartPositionMs = -1L
+        }
+    }
+    LaunchedEffect(remoteSeeking) {
+        if (!remoteSeeking) return@LaunchedEffect
+        while (isActive && remoteSeek.isActive) {
+            val target = remoteSeek.update(SystemClock.uptimeMillis())
+            val distance = abs(target - remoteSeek.startPositionMs) / 1_000
+            val position = DateUtils.formatElapsedTime(target / 1_000)
+            val duration = remoteSeek.durationMs.takeIf { it > 0L }?.let { " / ${DateUtils.formatElapsedTime(it / 1_000)}" }.orEmpty()
+            seekFeedback = "${if (remoteSeek.forward) "快进" else "快退"} $distance 秒 · 目标 $position$duration · 松手跳转"
+            playerView?.findViewById<androidx.media3.ui.DefaultTimeBar>(androidx.media3.ui.R.id.exo_progress)?.setPosition(target)
+            delay(100)
         }
     }
     LaunchedEffect(player) {
@@ -519,6 +554,11 @@ fun NativePlayer(
                     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
                         return handlePlaybackKey(event) || super.dispatchKeyEvent(event)
                     }
+
+                    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+                        super.onWindowFocusChanged(hasWindowFocus)
+                        if (!hasWindowFocus) finishRemoteSeek(commit = false)
+                    }
                 }.apply {
                     useController = true
                     // 由遥控器下键主动打开底栏，5 秒无操作后交给 Media3 自动隐藏。
@@ -612,7 +652,7 @@ fun NativePlayer(
                                     height = buttonSize
                                 }
                                 setPadding(iconPadding, iconPadding, iconPadding, iconPadding)
-                                setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                                applyTvControlFocus(false)
                             }
                             setOnFocusChangeListener { target, focused ->
                                 if (progress) {
@@ -637,7 +677,7 @@ fun NativePlayer(
                         setTextColor(android.graphics.Color.WHITE)
                         gravity = Gravity.CENTER
                         isFocusable = true
-                        setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                        applyTvControlFocus(false)
                         setOnFocusChangeListener { target, focused ->
                             target.applyTvControlFocus(focused)
                             updateControlHint(target, focused, "倍速")
@@ -657,21 +697,25 @@ fun NativePlayer(
                             isEnabled = enabled
                             alpha = if (enabled) 1f else .4f
                             setPadding(iconPadding, iconPadding, iconPadding, iconPadding)
-                            setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                            applyTvControlFocus(false)
                             setOnFocusChangeListener { target, focused ->
                                 target.applyTvControlFocus(focused)
                                 updateControlHint(target, focused, description)
                             }
                             setOnClickListener { action() }
                         }
-                        basicControls.addView(button, insertAt++, LinearLayout.LayoutParams(buttonSize, buttonSize))
+                        basicControls.addView(button, insertAt++, LinearLayout.LayoutParams(buttonSize, buttonSize).apply {
+                            marginEnd = (8 * resources.displayMetrics.density).roundToInt()
+                        })
                     }
                     addControl(R.drawable.tv_next_episode, "下一集", hasNext) {
                         reportPosition()
                         onNextEpisode()
                     }
                     // 按视图顺序排列“下一集、倍速、选集”，遥控器左右焦点随之保持一致。
-                    basicControls.addView(speedButton, insertAt++, LinearLayout.LayoutParams((104 * resources.displayMetrics.density).roundToInt(), buttonSize))
+                    basicControls.addView(speedButton, insertAt++, LinearLayout.LayoutParams((104 * resources.displayMetrics.density).roundToInt(), buttonSize).apply {
+                        marginEnd = (8 * resources.displayMetrics.density).roundToInt()
+                    })
                     if (hasEpisodeSelection) addControl(R.drawable.tv_episode_list, "选集") {
                         openEpisodeMenu()
                     }
@@ -691,9 +735,9 @@ fun NativePlayer(
             Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
                 LoadingIndicator()
                 Spacer(Modifier.height(12.dp))
-                Label("加载中", 22, Color.White)
+                Label("加载中", 24, Color.White)
             }
-        } else if (playbackPaused || showPlayFeedback) {
+        } else if (!remoteSeeking && (playbackPaused || showPlayFeedback)) {
             Box(
                 Modifier.align(Alignment.Center).size(88.dp).background(Color(0x99000000), CircleShape),
                 contentAlignment = Alignment.Center,
@@ -709,7 +753,7 @@ fun NativePlayer(
         if (controllerVisible && !showEpisodes && !showSpeedMenu) {
             Label(
                 "$title · ${currentEpisodes.getOrNull(currentEpisodeIndex)?.label.orEmpty()}",
-                18, Color.White,
+                24, Color.White,
                 Modifier.align(Alignment.TopStart).background(Color(0xC0101014)).padding(horizontal = 20.dp, vertical = 14.dp),
                 maxLines = 1,
             )
@@ -743,10 +787,10 @@ fun NativePlayer(
                 }
                 Box(Modifier.fillMaxSize().background(Color(0x99000000))) {
                     Column(
-                        Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(480.dp)
+                        Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(600.dp)
                             .background(Color(0xF51C1C21)).padding(22.dp),
                     ) {
-                        Label("选集", 25, Color.White, bold = true)
+                        Label("选集", 28, Color.White, bold = true)
                         Spacer(Modifier.height(18.dp))
                         val episodes = currentEpisodes
                         val focusIndex = if (episodes.isNotEmpty()) {
@@ -754,14 +798,14 @@ fun NativePlayer(
                         } else 0
                         val playingLabel = currentEpisodes.getOrNull(currentEpisodeIndex)?.label
                         Label(if (playingLabel != null) "正在播放：$playingLabel · 共 ${episodes.size} 集"
-                            else "${episodes.size} 集 · 选择后立即播放", 16, Color(0xFFA6A6AF))
+                            else "${episodes.size} 集 · 选择后立即播放", 20, Color(0xFFA6A6AF))
                         Spacer(Modifier.height(12.dp))
                         LazyVerticalGrid(
                             columns = GridCells.Fixed(3),
                             state = episodeGridState,
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
-                            horizontalArrangement = Arrangement.spacedBy(9.dp),
-                            verticalArrangement = Arrangement.spacedBy(9.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
                             modifier = Modifier.weight(1f),
                         ) {
                             items(episodes.indices.toList(), key = { "$currentLineIndex:$it" }) { index ->
@@ -789,11 +833,11 @@ fun NativePlayer(
             Dialog(onDismissRequest = { showSpeedMenu = false }, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false)) {
                 Box(Modifier.fillMaxSize().background(Color(0x99000000))) {
                     Column(
-                        Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(280.dp)
+                        Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(320.dp)
                             .background(Color(0xF51C1C21)).padding(22.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        Label("播放速率", 25, Color.White, bold = true)
+                        Label("播放速率", 28, Color.White, bold = true)
                         Spacer(Modifier.height(6.dp))
                         speedOptions.forEach { speed ->
                             FocusButton(
@@ -802,7 +846,7 @@ fun NativePlayer(
                                 onClick = { onSpeedChange(speed); showSpeedMenu = false },
                             )
                         }
-                        Label("按返回键关闭", 15, Color(0xFFA6A6AF))
+                        Label("按返回键关闭", 20, Color(0xFFA6A6AF))
                     }
                 }
             }
@@ -811,7 +855,14 @@ fun NativePlayer(
 }
 
 // Media3 使用原生 View，集中同步其颜色和缩放，避免与页面按钮产生两套高亮语言。
-private fun View.applyTvControlFocus(focused: Boolean) {
+internal fun View.applyTvControlFocus(focused: Boolean) {
+    // 已自行绘制圆角焦点背景，关闭系统额外叠加的矩形焦点框。
+    defaultFocusHighlightEnabled = false
+    // Material 默认的按压抬升动画会为放大的按钮增加阴影，并被底栏裁切。
+    stateListAnimator = null
+    elevation = 0f
+    translationZ = 0f
+    outlineProvider = null
     foreground = null
     val density = resources.displayMetrics.density
     background = if (focused) StateListDrawable().apply {

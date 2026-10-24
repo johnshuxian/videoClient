@@ -516,7 +516,7 @@ function Player({
   hasNextEpisode: boolean;
   onProgress: (position: number, duration: number) => void;
   onPlaying: () => void;
-  onEnded: () => void;
+  onEnded: (fullscreen: boolean) => void;
   onNextEpisode: () => void;
   onFailure: (position: number) => boolean;
   playerInstance: React.RefObject<Artplayer | null>;
@@ -828,7 +828,14 @@ function Player({
           sourceRef.current?.clearTimers();
         });
         art.on("video:ended", () => {
-          if (sourceRef.current?.loaded) onEndedRef.current();
+          if (!sourceRef.current?.loaded) return;
+          const fullscreen = art.fullscreenWeb || art.fullscreen;
+          // 最后一集结束时先恢复页面和系统栏，再让详情页卸载播放器。
+          if (fullscreen && !hasNextRef.current) {
+            if (art.fullscreen) art.fullscreen = false;
+            if (art.fullscreenWeb) art.fullscreenWeb = false;
+          }
+          onEndedRef.current(fullscreen);
         });
         art.on("video:error", () => {
           const code = art?.video.error?.code;
@@ -1051,12 +1058,12 @@ export default function App() {
   async function checkForUpdates() {
     if (updateBusy || !window.videoAPI.checkForUpdates) return;
     setUpdateBusy("checking");
-    setUpdateMessage("正在检查更新…");
+    setUpdateMessage("");
     setUpdateError(false);
     try {
       const update = await window.videoAPI.checkForUpdates(updateRoute);
       setAppUpdate(update);
-      setUpdateMessage(update ? "发现新版本" : "当前已是最新版本");
+      setUpdateMessage(update ? "" : "当前已是最新版本");
     } catch (error) {
       setUpdateError(true);
       setUpdateMessage(`检查更新失败：${error instanceof Error ? error.message : String(error)}。可切换线路后重试。`);
@@ -1084,6 +1091,12 @@ export default function App() {
   }
 
   useEffect(() => window.videoAPI.onUpdateProgress?.(setUpdateProgress), []);
+
+  useEffect(() => {
+    if (!updateMessage || updateBusy) return;
+    const timer = setTimeout(() => setUpdateMessage(""), 2000);
+    return () => clearTimeout(timer);
+  }, [updateMessage, updateBusy]);
 
   function closeDetail(immediate = false) {
     if (detailClosing) return;
@@ -1945,7 +1958,13 @@ export default function App() {
     }
   }
 
-  function nextEpisode() {
+  function nextEpisode(fullscreen = false) {
+    if (fullscreen && detail && episode !== null &&
+        episode + 1 >= detail.lines[line].episodes.length) {
+      setEpisode(null);
+      detailScroll.current?.scrollTo(0, 0);
+      return;
+    }
     if (autoplay) playNextEpisode();
   }
 
@@ -3412,9 +3431,9 @@ export default function App() {
                     <option value="direct">直连</option>
                   </select>
                 </label>
-                {(updateMessage || updateBusy === "downloading") &&
-                  <p className={`settings-update-status${updateError ? " is-error" : ""}`} role="status">
-                    {updateBusy === "downloading" ? `正在下载更新 ${updateProgress}%（完成后打开安装程序）` : updateMessage}
+                {updateBusy === "downloading" &&
+                  <p className="settings-update-status" role="status">
+                    正在下载更新 {updateProgress}%（完成后打开安装程序）
                   </p>}
               </>}
               <div className="settings-subhead">
@@ -3584,6 +3603,16 @@ export default function App() {
                 了解点播源格式 <ChevronDown size={14} />
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {updateMessage && (
+        <div className="modal-backdrop update-result-backdrop">
+          <div className={`cast-modal update-result-popup${updateError ? " is-error" : ""}`}
+            role="status" aria-live="polite">
+            {updateError ? <X size={22} /> : <Check size={22} />}
+            <p>{updateMessage}</p>
           </div>
         </div>
       )}
