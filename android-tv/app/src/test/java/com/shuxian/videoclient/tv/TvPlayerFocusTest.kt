@@ -82,7 +82,7 @@ class TvPlayerFocusTest {
     }
 
     @Test
-    fun seekingShowsOnlyTheReleaseToSeekHint() {
+    fun seekingShowsOnlyTheTargetHint() {
         val player = showPlayer()
         val hint = player.findViewById<View>(R.id.tv_control_hint)
         compose.runOnIdle {
@@ -91,7 +91,8 @@ class TvPlayerFocusTest {
             val now = SystemClock.uptimeMillis()
             player.dispatchKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_RIGHT, 0))
         }
-        compose.onNodeWithText("松手跳转", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("快进 10 秒 · 目标 00:10").assertIsDisplayed()
+        compose.onNodeWithText("松手跳转", substring = true).assertDoesNotExist()
         compose.runOnIdle {
             player.viewTreeObserver.dispatchOnPreDraw()
             assertEquals("预览时不能叠加进度条的操作提示", View.INVISIBLE, hint.visibility)
@@ -103,5 +104,42 @@ class TvPlayerFocusTest {
             player.viewTreeObserver.dispatchOnPreDraw()
             assertEquals("取消预览后恢复普通焦点提示", View.VISIBLE, hint.visibility)
         }
+    }
+
+    @Test
+    fun quickTapKeepsTheTargetHintForOneSecond() {
+        val player = showPlayer()
+        compose.runOnIdle {
+            // 同一帧内按下并松手，验证提示不依赖预览协程是否已经开始刷新。
+            val now = SystemClock.uptimeMillis()
+            player.dispatchKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_RIGHT, 0))
+            player.dispatchKeyEvent(KeyEvent(now, now + 50, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_RIGHT, 0))
+        }
+        compose.mainClock.advanceTimeBy(64)
+        compose.onNodeWithText("快进 10 秒 · 目标 00:10").assertIsDisplayed()
+        compose.onNodeWithText("当前", substring = true).assertDoesNotExist()
+        compose.mainClock.advanceTimeBy(800)
+        compose.onNodeWithText("快进 10 秒 · 目标 00:10").assertIsDisplayed()
+        compose.mainClock.advanceTimeBy(300)
+        compose.onNodeWithText("快进 10 秒 · 目标 00:10").assertDoesNotExist()
+    }
+
+    @Test
+    fun releaseKeepsTheFinalTargetAfterHolding() {
+        val player = showPlayer()
+        var pressedAtMs = 0L
+        compose.runOnIdle {
+            pressedAtMs = SystemClock.uptimeMillis()
+            player.dispatchKeyEvent(KeyEvent(pressedAtMs, pressedAtMs, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_RIGHT, 0))
+        }
+        compose.mainClock.advanceTimeBy(64)
+        compose.onNodeWithText("快进 10 秒 · 目标 00:10").assertIsDisplayed()
+        compose.runOnIdle {
+            // 松手时重算最终目标，即使最后一次预览刷新尚未到来也能保持正确文案。
+            player.dispatchKeyEvent(KeyEvent(pressedAtMs, pressedAtMs + 2_000, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_RIGHT, 0))
+        }
+        compose.mainClock.advanceTimeBy(64)
+        compose.onNodeWithText("快进 70 秒 · 目标 01:10").assertIsDisplayed()
+        compose.onNodeWithText("松手跳转", substring = true).assertDoesNotExist()
     }
 }

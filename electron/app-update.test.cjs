@@ -41,6 +41,41 @@ test("更新接口和安装包使用同一条选定线路", () => {
   assert.throws(() => updateAddress(url, "other"));
 });
 
+test("每次检查前清理更新目录，检查失败也清理且保留无关文件", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "videoClient-update-test-"));
+  t.after(async () => {
+    assert.equal(path.dirname(path.resolve(directory)), path.resolve(os.tmpdir()));
+    await fs.rm(directory, { recursive: true, force: true });
+  });
+  const unrelated = path.join(directory, "other-downloads");
+  await fs.mkdir(unrelated);
+  await fs.writeFile(path.join(unrelated, "keep.txt"), "keep");
+  // 同前缀的普通文件也不属于更新下载目录。
+  await fs.writeFile(path.join(directory, "videoclient-update-note.txt"), "keep");
+  const old = await fs.mkdtemp(path.join(directory, "videoclient-update-"));
+  await fs.mkdir(path.join(old, "nested"));
+  await fs.writeFile(path.join(old, "nested", "old.exe"), binary);
+  const partial = await fs.mkdtemp(path.join(directory, "videoclient-update-"));
+  await fs.writeFile(path.join(partial, "old.exe.part"), binary);
+  let offline = false;
+  t.mock.method(globalThis, "fetch", async () => {
+    assert.deepEqual((await fs.readdir(directory)).sort(), ["other-downloads", "videoclient-update-note.txt"]);
+    if (offline) throw new Error("网络不可用");
+    return new Response(JSON.stringify({ tag_name: "v0.2.42" }));
+  });
+  const updater = createDesktopUpdater({ getVersion: () => "0.2.42", getPath: () => directory }, {}, () => {});
+  assert.equal(await updater.check("direct"), null);
+  const next = await fs.mkdtemp(path.join(directory, "videoclient-update-"));
+  await fs.writeFile(path.join(next, "new.exe"), binary);
+  offline = true;
+  await assert.rejects(() => updater.check("direct"), /网络不可用/);
+  assert.equal(await fs.readFile(path.join(unrelated, "keep.txt"), "utf8"), "keep");
+  assert.equal(await fs.readFile(path.join(directory, "videoclient-update-note.txt"), "utf8"), "keep");
+  // 请求失败后应解除忙碌状态，允许再次检查。
+  offline = false;
+  assert.equal(await updater.check("direct"), null);
+});
+
 test("仅在用户调用安装后下载；校验失败不能启动安装程序", async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "videoClient-update-test-"));
   t.after(async () => {
@@ -71,4 +106,44 @@ test("仅在用户调用安装后下载；校验失败不能启动安装程序",
   assert.deepEqual(await fs.readFile(opened[0]), binary);
   assert.equal(requests.every((url) => url.startsWith("https://gh-proxy.org/")), true);
   await assert.rejects(() => updater.install(), /先检查更新/);
+});
+
+test("检查与下载互斥，下载过程中不会清理安装文件", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "videoClient-update-test-"));
+  t.after(async () => {
+    assert.equal(path.dirname(path.resolve(directory)), path.resolve(os.tmpdir()));
+    await fs.rm(directory, { recursive: true, force: true });
+  });
+  let startDownload;
+  const downloading = new Promise((resolve) => { startDownload = resolve; });
+  let finishDownload;
+  const contents = new Promise((resolve) => { finishDownload = resolve; });
+  t.mock.method(globalThis, "fetch", async (url) => {
+    if (url.includes("api.github.com")) {
+      return new Response(JSON.stringify(release(process.platform === "darwin" ? "macos" : "windows", process.arch)));
+    }
+    startDownload();
+    await contents;
+    return new Response(binary);
+  });
+  let installer;
+  const updater = createDesktopUpdater({ isPackaged: true, getVersion: () => "0.2.42",
+    getPath: () => directory, quit: () => {} }, { openPath: async (file) => { installer = file; return ""; } }, () => {});
+  const checking = updater.check("direct");
+  await assert.rejects(() => updater.check("direct"), /正在检查或下载/);
+  await assert.rejects(() => updater.install(), /正在检查或下载/);
+  await checking;
+  const installing = updater.install();
+  try {
+    await downloading;
+    const files = await fs.readdir(directory);
+    await assert.rejects(() => updater.check("direct"), /正在检查或下载/);
+    assert.deepEqual(await fs.readdir(directory), files);
+  } finally {
+    finishDownload();
+    await installing;
+  }
+  assert.deepEqual(await fs.readFile(installer), binary);
+  await updater.check("direct");
+  assert.deepEqual(await fs.readdir(directory), []);
 });

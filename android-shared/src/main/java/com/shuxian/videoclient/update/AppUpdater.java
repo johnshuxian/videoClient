@@ -97,6 +97,17 @@ public final class AppUpdater {
     // 网络和文件操作由调用方放到工作线程，不阻塞遥控器或 WebView。
     public UpdateInfo check(String route) throws Exception {
         pending = null;
+        installer = null;
+        awaitingPermission = false;
+        // 此目录只保存 APK 和 .part；每次重新检查都放弃上次安装并清空下载缓存。
+        File directory = new File(context.getCacheDir(), "updates");
+        File[] downloads = directory.listFiles();
+        if (downloads == null && directory.exists()) throw new IOException("无法读取更新目录");
+        if (downloads != null) {
+            for (File file : downloads) {
+                if (!file.delete()) throw new IOException("无法清理旧更新包：" + file.getName());
+            }
+        }
         HttpURLConnection connection = connect(RELEASE_API, route);
         JSONObject release;
         try (InputStream input = connection.getInputStream(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {

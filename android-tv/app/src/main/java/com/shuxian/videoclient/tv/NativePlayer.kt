@@ -177,11 +177,22 @@ fun NativePlayer(
         }
     }
 
+    fun updateRemoteSeekFeedback(atMs: Long) {
+        // 按下、预览刷新和松手共用文案，快速短按也能立即显示目标位置。
+        val target = remoteSeek.update(atMs)
+        val distance = abs(target - remoteSeek.startPositionMs) / 1_000
+        val position = DateUtils.formatElapsedTime(target / 1_000)
+        val duration = remoteSeek.durationMs.takeIf { it > 0L }?.let { " / ${DateUtils.formatElapsedTime(it / 1_000)}" }.orEmpty()
+        seekFeedback = "${if (remoteSeek.forward) "快进" else "快退"} $distance 秒 · 目标 $position$duration"
+        playerView?.findViewById<androidx.media3.ui.DefaultTimeBar>(androidx.media3.ui.R.id.exo_progress)?.setPosition(target)
+    }
+
     fun finishRemoteSeek(commit: Boolean, resume: Boolean = true, atMs: Long = SystemClock.uptimeMillis()) {
         if (!remoteSeek.isActive) return
-        seekFeedback = ""
+        if (commit) updateRemoteSeekFeedback(atMs) else seekFeedback = ""
         remoteSeek.finish(atMs, commit, resume)
         remoteSeeking = false
+        if (commit) seekActivity++
         playerView?.controllerShowTimeoutMs = 5_000
         playerView?.findViewById<androidx.media3.ui.DefaultTimeBar>(androidx.media3.ui.R.id.exo_progress)
             ?.setPosition(player.currentPosition)
@@ -223,6 +234,7 @@ fun NativePlayer(
                     stopFastForward()
                     remoteSeek.start(event.keyCode, event.eventTime)
                     remoteSeeking = true
+                    updateRemoteSeekFeedback(event.eventTime)
                     // 长按预览时保留已打开的进度条，松手后恢复自动隐藏。
                     playerView?.controllerShowTimeoutMs = 0
                 }
@@ -332,7 +344,8 @@ fun NativePlayer(
                 onPlaybackFailure(error.message ?: "当前线路播放失败", player.currentPosition)
             }
             override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
-                if (reason != Player.DISCONTINUITY_REASON_SEEK) return
+                // 遥控器松手沿用本次预览，避免回调切换文案或累计上一次快进的距离。
+                if (reason != Player.DISCONTINUITY_REASON_SEEK || remoteSeeking) return
                 // 连续按快进时从第一次的位置累计，让提示显示总共跳过的时间。
                 if (seekStartPositionMs < 0) seekStartPositionMs = oldPosition.positionMs
                 val differenceMs = newPosition.positionMs - seekStartPositionMs
@@ -340,7 +353,7 @@ fun NativePlayer(
                 val seconds = kotlin.math.abs(differenceMs) / 1000
                 val now = DateUtils.formatElapsedTime((newPosition.positionMs / 1000).coerceAtLeast(0))
                 val duration = player.duration.takeIf { it > 0 }?.let { " / ${DateUtils.formatElapsedTime(it / 1000)}" }.orEmpty()
-                seekFeedback = "$direction ${seconds} 秒 · 当前 $now$duration"
+                seekFeedback = "$direction ${seconds} 秒 · 目标 $now$duration"
                 seekActivity++
             }
         }
@@ -415,7 +428,7 @@ fun NativePlayer(
     }
     LaunchedEffect(seekActivity, remoteSeeking) {
         if (seekActivity > 0 && !remoteSeeking) {
-            delay(1_800)
+            delay(1_000)
             seekFeedback = ""
             seekStartPositionMs = -1L
         }
@@ -423,12 +436,7 @@ fun NativePlayer(
     LaunchedEffect(remoteSeeking) {
         if (!remoteSeeking) return@LaunchedEffect
         while (isActive && remoteSeek.isActive) {
-            val target = remoteSeek.update(SystemClock.uptimeMillis())
-            val distance = abs(target - remoteSeek.startPositionMs) / 1_000
-            val position = DateUtils.formatElapsedTime(target / 1_000)
-            val duration = remoteSeek.durationMs.takeIf { it > 0L }?.let { " / ${DateUtils.formatElapsedTime(it / 1_000)}" }.orEmpty()
-            seekFeedback = "${if (remoteSeek.forward) "快进" else "快退"} $distance 秒 · 目标 $position$duration · 松手跳转"
-            playerView?.findViewById<androidx.media3.ui.DefaultTimeBar>(androidx.media3.ui.R.id.exo_progress)?.setPosition(target)
+            updateRemoteSeekFeedback(SystemClock.uptimeMillis())
             delay(100)
         }
     }

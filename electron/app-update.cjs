@@ -48,20 +48,33 @@ function createDesktopUpdater(app, shell, onProgress) {
   let busy = false;
   return {
     async check(route) {
-      if (busy) throw new Error("正在下载更新，请稍候");
+      if (busy) throw new Error("正在检查或下载更新，请稍候");
+      busy = true;
       pending = null;
-      const response = await fetch(updateAddress(releaseApi, route), {
-        headers: { "User-Agent": "videoClient", Accept: "application/vnd.github+json" },
-        signal: AbortSignal.timeout(25000),
-        cache: "no-store",
-      });
-      if (!response.ok) throw new Error(`检查更新失败（HTTP ${response.status}）`);
-      const update = releaseUpdate(await response.json(), app.getVersion(), process.platform, process.arch);
-      if (update) pending = { ...update, route };
-      return update && { version: update.version, notes: update.notes, size: update.size };
+      try {
+        // 只清理本应用创建的更新目录，包括旧版本安装包和中断下载的残留。
+        const temporaryDirectory = path.resolve(app.getPath("temp"));
+        for (const entry of await fs.readdir(temporaryDirectory, { withFileTypes: true })) {
+          if (!entry.isDirectory() || !entry.name.startsWith("videoclient-update-")) continue;
+          const directory = path.resolve(temporaryDirectory, entry.name);
+          if (path.dirname(directory) !== temporaryDirectory) throw new Error("更新目录无效");
+          await fs.rm(directory, { recursive: true, force: true });
+        }
+        const response = await fetch(updateAddress(releaseApi, route), {
+          headers: { "User-Agent": "videoClient", Accept: "application/vnd.github+json" },
+          signal: AbortSignal.timeout(25000),
+          cache: "no-store",
+        });
+        if (!response.ok) throw new Error(`检查更新失败（HTTP ${response.status}）`);
+        const update = releaseUpdate(await response.json(), app.getVersion(), process.platform, process.arch);
+        if (update) pending = { ...update, route };
+        return update && { version: update.version, notes: update.notes, size: update.size };
+      } finally {
+        busy = false;
+      }
     },
     async install() {
-      if (busy) throw new Error("正在下载更新，请稍候");
+      if (busy) throw new Error("正在检查或下载更新，请稍候");
       if (!pending) throw new Error("请先检查更新");
       if (!app.isPackaged) throw new Error("请在已安装的正式版本中运行更新安装");
       busy = true;
