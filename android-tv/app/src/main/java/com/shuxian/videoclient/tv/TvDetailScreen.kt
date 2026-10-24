@@ -9,10 +9,20 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.dp
 
 @Composable
@@ -35,8 +45,26 @@ internal fun TvDetailScreen(
     onEpisode: (Int) -> Unit,
 ) {
     val episodes = detail.lines.getOrNull(lineIndex)?.episodes.orEmpty()
+    var movingUp by remember { mutableStateOf(false) }
+    var revealHeader by remember { mutableStateOf(false) }
+    LaunchedEffect(revealHeader) {
+        if (!revealHeader) return@LaunchedEffect
+        try {
+            // 焦点系统只保证按钮可见；返回顶部操作区时，需要把上方介绍一起滚回。
+            grid.animateScrollToItem(0)
+        } finally {
+            revealHeader = false
+        }
+    }
     // 详情介绍和选集共用懒加载网格，小屏幕也能完整浏览大字号操作区。
-    LazyVerticalGrid(columns = GridCells.Adaptive(168.dp), state = grid, modifier = Modifier.fillMaxSize(),
+    LazyVerticalGrid(columns = GridCells.Adaptive(168.dp), state = grid, modifier = Modifier.fillMaxSize().onPreviewKeyEvent { event ->
+        if (event.type == KeyEventType.KeyDown) {
+            movingUp = event.key == Key.DirectionUp
+            // 重新下移时终止回顶；在顶部左右换按钮时仍需完整露出介绍。
+            if (event.key == Key.DirectionDown) revealHeader = false
+        }
+        false
+    },
         contentPadding = PaddingValues(horizontal = 42.dp, vertical = 24.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item(key = "detail-header", span = { GridItemSpan(maxLineSpan) }) {
@@ -52,11 +80,19 @@ internal fun TvDetailScreen(
                         Label(detail.description.ifBlank { "暂无剧情介绍" }, 22, white, Modifier.padding(top = 10.dp), maxLines = 3)
                     }
                 }
-                Row(Modifier.padding(top = 20.dp), verticalAlignment = Alignment.CenterVertically,
+                Row(Modifier.padding(top = 20.dp).onPreviewKeyEvent { event ->
+                    if (event.key == Key.DirectionUp && event.type == KeyEventType.KeyDown) {
+                        // 已在操作区继续按上，也能恢复触屏滚动后被裁掉的页头。
+                        if (grid.canScrollBackward) revealHeader = true
+                        true
+                    } else false
+                }, verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     FocusButton(if (saved != null) "继续播放" else "立刻播放", primary = true,
-                        icon = R.drawable.tv_player_play, enabled = episodes.isNotEmpty(), modifier = Modifier.focusRequester(playFocus), onClick = onPlay)
-                    FocusButton("搜索其他资源", icon = R.drawable.tv_search, modifier = Modifier.focusRequester(searchFocus), onClick = onSearch)
+                        icon = R.drawable.tv_player_play, enabled = episodes.isNotEmpty(), modifier = Modifier.focusRequester(playFocus),
+                        onFocus = { if (movingUp && grid.canScrollBackward) revealHeader = true }, onClick = onPlay)
+                    FocusButton("搜索其他资源", icon = R.drawable.tv_search, modifier = Modifier.focusRequester(searchFocus),
+                        onFocus = { if (movingUp && grid.canScrollBackward) revealHeader = true }, onClick = onSearch)
                 }
                 if (saved != null) Label("上次看到 ${saved.episodeLabel} · %02d:%02d".format(saved.positionMs / 60_000, saved.positionMs / 1000 % 60),
                     20, muted, Modifier.padding(top = 10.dp), maxLines = 1)

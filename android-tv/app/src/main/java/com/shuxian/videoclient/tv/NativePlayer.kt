@@ -229,12 +229,13 @@ fun NativePlayer(
                 return true
             }
             KeyEvent.KEYCODE_DPAD_DOWN -> {
+                val firstControl = playerView?.findViewWithTag<View>(if (hasNext) "next_control" else "speed_control")
                 if (controllerVisible) {
                     val progress = playerView?.findViewById<View>(androidx.media3.ui.R.id.exo_progress)
                     if (playerView?.findFocus() === progress) {
-                        // Media3 进度条会吃掉下键；明确移到底栏的倍速按钮。
+                        // 下移进入底栏最左侧可用操作：下一集；末集则进入倍速。
                         if (event.action == KeyEvent.ACTION_DOWN) {
-                            playerView?.findViewWithTag<View>("speed_control")?.requestFocus()
+                            firstControl?.requestFocus()
                         }
                         return true
                     }
@@ -246,7 +247,7 @@ fun NativePlayer(
                     playerView?.post {
                         val progress = playerView?.findViewById<View>(androidx.media3.ui.R.id.exo_progress)
                         if (progress?.requestFocus() != true) {
-                            playerView?.findViewWithTag<View>("speed_control")?.requestFocus()
+                            firstControl?.requestFocus()
                         }
                     }
                 }
@@ -586,6 +587,9 @@ fun NativePlayer(
                     }
                     val hintPositionListener = ViewTreeObserver.OnPreDrawListener {
                         val target = hintTarget
+                        // 快进预览、跳转反馈和长按倍速已有独立提示，只保留一个反馈框。
+                        controlHint.visibility = if (target != null && target.hasFocus() && controllerVisible &&
+                            !remoteSeeking && seekFeedback.isEmpty() && heldSpeed == null) View.VISIBLE else View.INVISIBLE
                         if (target != null && controlHint.visibility == View.VISIBLE && target.hasFocus()) {
                             // 使用同一原生容器内的实际坐标，跟随控制栏动画、横向滚动及屏幕尺寸变化。
                             val maxWidth = (hintContainer.width - hintInset * 2).coerceAtLeast(0)
