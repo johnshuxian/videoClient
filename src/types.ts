@@ -6,6 +6,8 @@ export type CatalogItem = {
   episodesInfo: string;
 };
 export type CatalogType = "movie" | "tv" | "anime" | "variety";
+export type UpdateRoute = "gh-proxy" | "direct";
+export type AppUpdate = { version: string; notes: string; size: number };
 export type Source = { name: string; url: string; isAdult: boolean };
 export type SourceHealth = {
   ok: boolean;
@@ -63,6 +65,9 @@ declare global {
   interface Window {
     videoAPI: {
       platform: string;
+      checkForUpdates?: (route: UpdateRoute) => Promise<AppUpdate | null>;
+      downloadAndInstallUpdate?: () => Promise<{ status: "started" | "permission-required" }>;
+      onUpdateProgress?: (callback: (percent: number) => void) => () => void;
       readSetting: (key: string) => unknown;
       saveSetting: (key: string, value: unknown) => void;
       listHistory: () => HistoryItem[];

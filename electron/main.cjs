@@ -9,6 +9,7 @@ const { parseEpisodes, videoUrlFromSharePage } = require("./media.cjs");
 const { proxyStream } = require("./stream-proxy.cjs");
 const { createSettingsStore } = require("./settings.cjs");
 const { discoverDlnaOnInterfaces } = require("./dlna-discovery.cjs");
+const { createDesktopUpdater } = require("./app-update.cjs");
 
 const requestHeaders = {
   "User-Agent":
@@ -24,6 +25,9 @@ let proxyPort = 0;
 let currentCast = null;
 let mainWindow;
 let settingsStore;
+const appUpdater = createDesktopUpdater(app, shell, (percent) => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("update:progress", percent);
+});
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) app.quit();
 
@@ -261,6 +265,8 @@ app.on("activate", () => {
 ipcMain.on("settings:read", (event, key) => {
   event.returnValue = settingsStore.get(key);
 });
+ipcMain.handle("update:check", (_event, route) => appUpdater.check(route));
+ipcMain.handle("update:install", () => appUpdater.install());
 ipcMain.on("settings:save", (event, key, value) => {
   try {
     settingsStore.set(key, value);

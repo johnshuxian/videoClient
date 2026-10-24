@@ -6,14 +6,14 @@
     <View
         android:id="@id/exo_controls_background"
         android:layout_width="match_parent"
-        android:layout_height="160dp"
+        android:layout_height="224dp"
         android:layout_gravity="bottom"
         android:background="@drawable/tv_player_scrim" />
 
     <FrameLayout
         android:id="@id/exo_bottom_bar"
         android:layout_width="match_parent"
-        android:layout_height="72dp"
+        android:layout_height="96dp"
         android:layout_marginTop="@dimen/exo_styled_bottom_bar_margin_top"
         android:layout_gravity="bottom"
         android:background="@android:color/transparent"
@@ -26,19 +26,23 @@
             android:layout_height="wrap_content"
             android:layout_gravity="center_vertical|start"
             android:layoutDirection="ltr"
-            android:paddingStart="@dimen/exo_styled_bottom_bar_time_padding"
-            android:paddingEnd="@dimen/exo_styled_bottom_bar_time_padding"
+            android:paddingStart="24dp"
+            android:paddingEnd="24dp"
             android:importantForAccessibility="noHideDescendants">
 
             <TextView
                 android:id="@id/exo_position"
-                style="@style/ExoStyledControls.TimeText.Position" />
+                style="@style/ExoStyledControls.TimeText.Position"
+                android:textSize="@dimen/tv_player_control_text_size" />
 
-            <TextView style="@style/ExoStyledControls.TimeText.Separator" />
+            <TextView
+                style="@style/ExoStyledControls.TimeText.Separator"
+                android:textSize="@dimen/tv_player_control_text_size" />
 
             <TextView
                 android:id="@id/exo_duration"
-                style="@style/ExoStyledControls.TimeText.Duration" />
+                style="@style/ExoStyledControls.TimeText.Duration"
+                android:textSize="@dimen/tv_player_control_text_size" />
         </LinearLayout>
 
         <LinearLayout
@@ -47,7 +51,10 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="center_vertical|end"
-            android:layoutDirection="ltr">
+            android:layoutDirection="ltr"
+            android:paddingStart="8dp"
+            android:paddingEnd="24dp"
+            android:clipToPadding="false">
 
             <ImageButton android:id="@id/exo_vr" style="@style/ExoStyledControls.Button.Bottom.VR" />
             <ImageButton android:id="@id/exo_shuffle" style="@style/ExoStyledControls.Button.Bottom.Shuffle" />
@@ -82,11 +89,11 @@
         android:layout_width="match_parent"
         android:layout_height="48dp"
         android:layout_gravity="bottom"
-        android:layout_marginBottom="64dp"
-        app:bar_height="4dp"
+        android:layout_marginBottom="88dp"
+        app:bar_height="6dp"
         app:touch_target_height="48dp"
-        app:scrubber_enabled_size="12dp"
-        app:scrubber_dragged_size="20dp"
+        app:scrubber_enabled_size="16dp"
+        app:scrubber_dragged_size="24dp"
         app:played_color="#FF792C" />
 
     <LinearLayout
@@ -128,10 +135,10 @@
         android:layout_height="wrap_content"
         android:layout_gravity="top|start"
         android:background="@drawable/tv_control_hint_background"
-        android:paddingHorizontal="14dp"
-        android:paddingVertical="8dp"
+        android:paddingHorizontal="18dp"
+        android:paddingVertical="10dp"
         android:textColor="#FFFFFF"
-        android:textSize="20sp"
+        android:textSize="@dimen/tv_player_control_text_size"
         android:maxLines="1"
         android:ellipsize="end"
         android:focusable="false"

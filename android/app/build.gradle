@@ -14,6 +14,7 @@ def hasReleaseSigning = signingStore.isFile() && signingPassword
 
 android {
     namespace = "com.shuxian.videoclient"
+    sourceSets.main.java.srcDirs += '../../android-shared/src/main/java'
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
         applicationId "com.shuxian.videoclient"

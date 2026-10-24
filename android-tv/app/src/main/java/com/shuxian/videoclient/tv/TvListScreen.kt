@@ -635,7 +635,7 @@ private fun TvHistoryList(
                     Poster(entry.item.poster, repository, Modifier.width(68.dp).height(94.dp))
                     Column(Modifier.weight(1f)) {
                         Label(entry.item.title, 22, if (focused) focusInk else white, bold = true, maxLines = 1)
-                        Label("${entry.episodeLabel} · ${entry.lineName} · ${entry.item.sourceName}", 17, if (focused) Color(0xFF53535E) else muted, Modifier.padding(top = 7.dp), maxLines = 1)
+                        Label("${entry.episodeLabel} · ${entry.item.sourceName}", 17, if (focused) Color(0xFF53535E) else muted, Modifier.padding(top = 7.dp), maxLines = 1)
                         val seconds = entry.positionMs / 1000
                         Label("看到 %02d:%02d".format(seconds / 60, seconds % 60), 17, if (focused) Color(0xFF9E410C) else accent, Modifier.padding(top = 7.dp))
                         Box(Modifier.fillMaxWidth().padding(top = 10.dp).height(4.dp).background(Color(0xFF44444B))) {

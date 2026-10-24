@@ -35,9 +35,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -50,7 +47,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
@@ -85,7 +81,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -112,7 +107,6 @@ fun NativePlayer(
     val audioManager = remember(context) { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val view = LocalView.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val scope = rememberCoroutineScope()
     var showEpisodes by remember(url) { mutableStateOf(false) }
     var showSpeedMenu by remember(url) { mutableStateOf(false) }
     var controllerVisible by remember(url) { mutableStateOf(false) }
@@ -127,17 +121,14 @@ fun NativePlayer(
     var lastRemoteSeekMs by remember(url) { mutableLongStateOf(0L) }
     var popupReturnTag by remember(url) { mutableStateOf<String?>(null) }
     var playerView by remember(url) { mutableStateOf<PlayerView?>(null) }
-    val episodeMenu = remember(url) { TvEpisodeMenuState(currentLineIndex) }
-    val selectedLine = episodeMenu.selectedLine
-    val lineFocus = remember { FocusRequester() }
+    var restoringEpisodes by remember(url) { mutableStateOf(false) }
     val episodeFocus = remember { FocusRequester() }
     val speedFocus = remember { FocusRequester() }
     val speedOptions = remember { listOf(0.75f, 1f, 1.25f, 1.5f, 2f) }
     val episodeGridState = rememberLazyGridState()
-    val lineRowState = rememberLazyListState()
     val currentEpisodes = lines.getOrNull(currentLineIndex)?.episodes.orEmpty()
     val hasNext = currentEpisodeIndex + 1 < currentEpisodes.size
-    val hasEpisodeSelection = lines.any { it.episodes.size > 1 }
+    val hasEpisodeSelection = currentEpisodes.size > 1
     val player = remember(url) {
         val uri = Uri.parse(url)
         val referer = "${uri.scheme}://${uri.authority}/"
@@ -185,8 +176,8 @@ fun NativePlayer(
     }
 
     fun openEpisodeMenu() {
-        // 遥控器菜单键和底栏按钮共用入口，不能沿用上次浏览但未播放的线路。
-        episodeMenu.open(currentLineIndex)
+        // 每次打开都定位当前播放集；播放线路只由失败自动切换逻辑管理。
+        restoringEpisodes = true
         popupReturnTag = "episode_control"
         showEpisodes = true
         playerView?.hideController()
@@ -540,8 +531,8 @@ fun NativePlayer(
                     val hintLocation = IntArray(2)
                     val hintContainerLocation = IntArray(2)
                     val progressBar = findViewById<View>(androidx.media3.ui.R.id.exo_progress)
-                    val hintInset = (16 * resources.displayMetrics.density).roundToInt()
-                    val hintGap = (8 * resources.displayMetrics.density).roundToInt()
+                    val hintInset = (24 * resources.displayMetrics.density).roundToInt()
+                    val hintGap = (12 * resources.displayMetrics.density).roundToInt()
                     var hintTarget: View? = null
                     fun updateControlHint(target: View, focused: Boolean, label: String) {
                         if (focused) {
@@ -597,6 +588,8 @@ fun NativePlayer(
                     })
                     hideController()
                     // 原生底栏与 Compose 按钮使用相同的浅底深色焦点。
+                    val buttonSize = resources.getDimensionPixelSize(R.dimen.tv_player_control_size)
+                    val iconPadding = resources.getDimensionPixelSize(R.dimen.tv_player_control_icon_padding)
                     val controlLabels = listOf(
                         androidx.media3.ui.R.id.exo_progress to "进度条 · 左右键跳转",
                         androidx.media3.ui.R.id.exo_vr to "VR",
@@ -612,7 +605,15 @@ fun NativePlayer(
                         findViewById<View>(id)?.apply {
                             val progress = id == androidx.media3.ui.R.id.exo_progress
                             if (progress) isFocusable = true
-                            else setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                            else {
+                                // 字幕、更多等原生按钮也统一放大，避免底栏混用 Media3 默认小图标。
+                                layoutParams = layoutParams.apply {
+                                    width = buttonSize
+                                    height = buttonSize
+                                }
+                                setPadding(iconPadding, iconPadding, iconPadding, iconPadding)
+                                setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                            }
                             setOnFocusChangeListener { target, focused ->
                                 if (progress) {
                                     (target as? androidx.media3.ui.DefaultTimeBar)?.apply {
@@ -628,13 +629,11 @@ fun NativePlayer(
                     findViewById<View>(androidx.media3.ui.R.id.exo_settings)?.visibility = View.GONE
                     val basicControls = findViewById<LinearLayout>(androidx.media3.ui.R.id.exo_basic_controls)
                     var insertAt = 0
-                    val buttonSize = (56 * resources.displayMetrics.density).toInt()
-                    val iconPadding = (14 * resources.displayMetrics.density).toInt()
                     val speedButton = TextView(context).apply {
                         id = View.generateViewId()
                         tag = "speed_control"
                         text = "$playbackSpeed×"
-                        textSize = 20f
+                        setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, resources.getDimension(R.dimen.tv_player_control_text_size))
                         setTextColor(android.graphics.Color.WHITE)
                         gravity = Gravity.CENTER
                         isFocusable = true
@@ -649,7 +648,6 @@ fun NativePlayer(
                             showSpeedMenu = true
                         }
                     }
-                    basicControls.addView(speedButton, insertAt++, LinearLayout.LayoutParams((80 * resources.displayMetrics.density).toInt(), buttonSize))
                     fun addControl(icon: Int, description: String, enabled: Boolean = true, action: () -> Unit) {
                         val button = ImageButton(context).apply {
                             setImageResource(icon)
@@ -672,6 +670,8 @@ fun NativePlayer(
                         reportPosition()
                         onNextEpisode()
                     }
+                    // 按视图顺序排列“下一集、倍速、选集”，遥控器左右焦点随之保持一致。
+                    basicControls.addView(speedButton, insertAt++, LinearLayout.LayoutParams((104 * resources.displayMetrics.density).roundToInt(), buttonSize))
                     if (hasEpisodeSelection) addControl(R.drawable.tv_episode_list, "选集") {
                         openEpisodeMenu()
                     }
@@ -716,8 +716,9 @@ fun NativePlayer(
         }
         if (heldSpeed != null || seekFeedback.isNotEmpty()) {
             Label(
-                if (heldSpeed != null) "2× 快进播放 · 松开恢复" else seekFeedback, 22, Color.White,
-                Modifier.align(Alignment.BottomCenter).padding(bottom = 140.dp)
+                if (heldSpeed != null) "2× 快进播放 · 松开恢复" else seekFeedback, 24, Color.White,
+                // 留出底栏、进度条和焦点提示的空间，快进反馈显示在它们上方。
+                Modifier.align(Alignment.BottomCenter).padding(bottom = 216.dp)
                     .background(Color(0xDD101014), androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
                     .padding(horizontal = 22.dp, vertical = 12.dp), bold = true,
             )
@@ -726,25 +727,19 @@ fun NativePlayer(
             // Dialog 独占遥控器焦点，方向键不会从选集面板移回播放器底栏。
             Dialog(onDismissRequest = { showEpisodes = false }, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false)) {
                 val dialogView = LocalView.current
-                LaunchedEffect(episodeMenu.restoring, selectedLine, lines, currentEpisodeIndex) {
-                    if (!episodeMenu.restoring) return@LaunchedEffect
+                LaunchedEffect(restoringEpisodes, currentLineIndex, currentEpisodes, currentEpisodeIndex) {
+                    if (!restoringEpisodes) return@LaunchedEffect
                     // 等 Dialog 获得窗口焦点，防止系统稍后的默认焦点覆盖当前集。
                     while (!dialogView.hasWindowFocus()) withFrameNanos { }
-                    if (lines.size > 1) lineRowState.scrollToItem(selectedLine)
-                    val episodes = lines.getOrNull(selectedLine)?.episodes.orEmpty()
+                    val episodes = currentEpisodes
                     if (episodes.isNotEmpty()) {
-                        val target = if (selectedLine == currentLineIndex) currentEpisodeIndex.coerceIn(episodes.indices) else 0
+                        val target = currentEpisodeIndex.coerceIn(episodes.indices)
                         episodeGridState.scrollToItem(target)
                         snapshotFlow { episodeGridState.layoutInfo.visibleItemsInfo.any { it.index == target } }.first { it }
                         withFrameNanos { }
                         episodeFocus.requestFocus()
-                    } else if (lines.size > 1) {
-                        snapshotFlow { lineRowState.layoutInfo.visibleItemsInfo.any { it.index == selectedLine } }.first { it }
-                        withFrameNanos { }
-                        lineFocus.requestFocus()
                     }
-                    // 恢复保护必须晚于 requestFocus，默认聚焦的线路才不会触发切线。
-                    episodeMenu.restorationComplete()
+                    restoringEpisodes = false
                 }
                 Box(Modifier.fillMaxSize().background(Color(0x99000000))) {
                     Column(
@@ -753,32 +748,12 @@ fun NativePlayer(
                     ) {
                         Label("选集", 25, Color.White, bold = true)
                         Spacer(Modifier.height(18.dp))
-                        if (lines.size > 1) {
-                            // 选集面板的首尾按钮聚焦后会放大，给描边留出空间。
-                            LazyRow(
-                                state = lineRowState,
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                horizontalArrangement = Arrangement.spacedBy(9.dp),
-                            ) {
-                                items(lines.indices.toList()) { index ->
-                                    val chooseLine: () -> Unit = {
-                                        if (episodeMenu.selectLine(index)) {
-                                            scope.launch { episodeGridState.scrollToItem(0) }
-                                        }
-                                    }
-                                    FocusButton(lines[index].name, selected = selectedLine == index, tab = true,
-                                        modifier = if (index == selectedLine) Modifier.focusRequester(lineFocus) else Modifier,
-                                        onFocus = chooseLine, onClick = chooseLine)
-                                }
-                            }
-                            Spacer(Modifier.height(18.dp))
-                        }
-                        val episodes = lines.getOrNull(selectedLine)?.episodes.orEmpty()
-                        val focusIndex = if (episodes.isNotEmpty() && selectedLine == currentLineIndex) {
+                        val episodes = currentEpisodes
+                        val focusIndex = if (episodes.isNotEmpty()) {
                             currentEpisodeIndex.coerceIn(episodes.indices)
                         } else 0
                         val playingLabel = currentEpisodes.getOrNull(currentEpisodeIndex)?.label
-                        Label(if (selectedLine == currentLineIndex && playingLabel != null) "正在播放：$playingLabel · 共 ${episodes.size} 集"
+                        Label(if (playingLabel != null) "正在播放：$playingLabel · 共 ${episodes.size} 集"
                             else "${episodes.size} 集 · 选择后立即播放", 16, Color(0xFFA6A6AF))
                         Spacer(Modifier.height(12.dp))
                         LazyVerticalGrid(
@@ -789,8 +764,8 @@ fun NativePlayer(
                             verticalArrangement = Arrangement.spacedBy(9.dp),
                             modifier = Modifier.weight(1f),
                         ) {
-                            items(episodes.indices.toList(), key = { "$selectedLine:$it" }) { index ->
-                                val playing = selectedLine == currentLineIndex && index == currentEpisodeIndex
+                            items(episodes.indices.toList(), key = { "$currentLineIndex:$it" }) { index ->
+                                val playing = index == currentEpisodeIndex
                                 FocusButton(
                                     episodes[index].label,
                                     selected = playing,
@@ -800,7 +775,7 @@ fun NativePlayer(
                                     onClick = {
                                         reportPosition()
                                         showEpisodes = false
-                                        onSelectEpisode(selectedLine, index)
+                                        onSelectEpisode(currentLineIndex, index)
                                     },
                                 )
                             }
@@ -841,10 +816,10 @@ private fun View.applyTvControlFocus(focused: Boolean) {
     val density = resources.displayMetrics.density
     background = if (focused) StateListDrawable().apply {
         addState(intArrayOf(android.R.attr.state_pressed), GradientDrawable().apply {
-            cornerRadius = 28 * density; setColor(0xFFD3D3DB.toInt())
+            cornerRadius = 36 * density; setColor(0xFFD3D3DB.toInt())
         })
         addState(intArrayOf(), GradientDrawable().apply {
-            cornerRadius = 28 * density; setColor(0xFFF7F7F9.toInt())
+            cornerRadius = 36 * density; setColor(0xFFF7F7F9.toInt())
         })
     } else null
     val color = if (focused) 0xFF17171C.toInt() else android.graphics.Color.WHITE

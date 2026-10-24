@@ -13,6 +13,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(VideoProxyPlugin.class);
         registerPlugin(DlnaPlugin.class);
         registerPlugin(StatusBarPlugin.class);
+        registerPlugin(AppUpdatePlugin.class);
         super.onCreate(savedInstanceState);
         // 整个应用共用这个 WebView，关闭其原生手势缩放。
         getBridge().getWebView().getSettings().setSupportZoom(false);

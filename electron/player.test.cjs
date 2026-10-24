@@ -53,6 +53,8 @@ if (process.versions.electron) {
     const server = await createServer({
       configFile: false,
       root: path.join(__dirname, ".."),
+      // 本地仓库可能含 Android SDK 和构建报告，依赖扫描只需覆盖测试使用的组件。
+      optimizeDeps: { entries: ["src/App.tsx"] },
       server: { host: "127.0.0.1", port: 0 },
       plugins: [{
         name: "player-lifecycle-test",

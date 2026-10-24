@@ -2,6 +2,8 @@ package com.shuxian.videoclient.tv
 
 import android.os.Bundle
 import android.os.SystemClock
+import android.widget.Toast
+import com.shuxian.videoclient.update.AppUpdater
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -58,6 +60,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -72,18 +76,28 @@ private data class OtherSourcePrompt(
 )
 
 class MainActivity : ComponentActivity() {
+    private lateinit var updater: AppUpdater
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        updater = AppUpdater(this, true)
         WindowCompat.getInsetsController(window, window.decorView).apply {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             hide(WindowInsetsCompat.Type.systemBars())
         }
-        setContent { TvApp(onExit = { finish() }) }
+        setContent { TvApp(updater, onExit = { finish() }) }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (!::updater.isInitialized) return
+        try { updater.resumeInstallation(this) }
+        catch (error: Exception) { Toast.makeText(this, "打开安装程序失败：${error.message}", Toast.LENGTH_LONG).show() }
     }
 }
 
 @Composable
-private fun TvApp(onExit: () -> Unit) {
+private fun TvApp(updater: AppUpdater, onExit: () -> Unit) {
     val context = LocalContext.current
     val keyboard = LocalSoftwareKeyboardController.current
     val repository = remember { VodRepository() }
@@ -119,6 +133,13 @@ private fun TvApp(onExit: () -> Unit) {
     val searchKeyword = searchedTerm.substringBefore(' ')
     var searchResults by remember { mutableStateOf<List<VideoItem>>(emptyList()) }
     var exactSearch by remember { mutableStateOf(settings.exactSearch) }
+    val currentVersion = remember { updater.currentVersion() }
+    var updateRoute by remember { mutableStateOf(settings.updateRoute) }
+    var updatePrompt by remember { mutableStateOf<AppUpdater.UpdateInfo?>(null) }
+    var updateBusy by remember { mutableStateOf("") }
+    var updatePercent by remember { mutableIntStateOf(0) }
+    var updateMessage by remember { mutableStateOf("") }
+    var updateError by remember { mutableStateOf(false) }
     // 保留源返回的全部结果，设置切换后搜索页可立即更新。
     val visibleSearchResults = remember(searchResults, exactSearch, searchKeyword) {
         val visible = if (exactSearch && searchKeyword.isNotEmpty()) {
@@ -162,6 +183,9 @@ private fun TvApp(onExit: () -> Unit) {
     val searchList = remember { TvListState(TvHeaderFocus.Search) }
     val settingsImportFocus = remember { FocusRequester() }
     val settingsSearchFocus = remember { FocusRequester() }
+    val settingsVersionFocus = remember { FocusRequester() }
+    val settingsRouteFocus = remember { FocusRequester() }
+    val cancelUpdateFocus = remember { FocusRequester() }
     var settingsHeaderTarget by remember { mutableStateOf<FocusRequester?>(null) }
     val settingsListState = rememberLazyListState()
     val detailPlayFocus = remember { FocusRequester() }
@@ -642,15 +666,46 @@ private fun TvApp(onExit: () -> Unit) {
             "settings" -> {
                 LazyColumn(state = settingsListState, modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(horizontal = 42.dp, vertical = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    item(key = "settings-header") { Label("设置", 30, white, bold = true) }
+                    item(key = "settings-header") {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Label("设置", 30, white, Modifier.weight(1f), bold = true)
+                            FocusButton("v$currentVersion", fontSize = 18, loading = updateBusy.isNotEmpty(),
+                                modifier = Modifier.focusRequester(settingsVersionFocus).onPreviewKeyEvent { event ->
+                                    if (event.key == Key.DirectionDown) {
+                                        if (event.type == KeyEventType.KeyDown) settingsHeaderTarget = settingsImportFocus
+                                        true
+                                    } else false
+                                }, onClick = {
+                                    if (updateBusy.isNotEmpty()) return@FocusButton
+                                    updateBusy = "checking"
+                                    updateMessage = "正在检查更新…"
+                                    updateError = false
+                                    scope.launch {
+                                        try {
+                                            updatePrompt = withContext(Dispatchers.IO) { updater.check(updateRoute) }
+                                            updateMessage = if (updatePrompt == null) "当前已是最新版本" else "发现新版本"
+                                        } catch (cancelled: CancellationException) { throw cancelled }
+                                        catch (error: Exception) {
+                                            updateError = true
+                                            updateMessage = "检查更新失败：${error.message}。可切换线路后重试。"
+                                        } finally { updateBusy = "" }
+                                    }
+                                })
+                        }
+                    }
                     // 分成独立的焦点行，让懒列表能逐行发现屏幕上方的控件。
                     item(key = "settings-subscription") { Column {
                         Spacer(Modifier.height(12.dp))
                         Label("vod.json 订阅地址", 18, white)
                         Spacer(Modifier.height(10.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(Modifier.onPreviewKeyEvent { event ->
+                            if (event.key == Key.DirectionUp) {
+                                if (event.type == KeyEventType.KeyDown) settingsHeaderTarget = settingsVersionFocus
+                                true
+                            } else false
+                        }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             SearchInput(subscriptionInput, { subscriptionInput = it }, "粘贴订阅地址", Modifier.weight(1f), ImeAction.Done) {}
-                            FocusButton(if (importing) "正在导入" else "导入 / 更新", loading = importing, primary = true,
+                            FocusButton(if (importing) "正在导入" else "导入", loading = importing, primary = true,
                                 modifier = Modifier.width(190.dp).focusRequester(settingsImportFocus), onClick = {
                                 importing = true
                                 settingsError = ""
@@ -694,6 +749,26 @@ private fun TvApp(onExit: () -> Unit) {
                                 exactSearch = it
                                 settings.exactSearch = exactSearch
                         }
+                        Spacer(Modifier.height(16.dp))
+                        Label("线路选择", 20, white, bold = true)
+                        Label("用于检查更新和下载安装包", 16, muted, Modifier.padding(top = 6.dp, bottom = 10.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            FocusButton("gh-proxy", selected = updateRoute == "gh-proxy", enabled = updateBusy.isEmpty(),
+                                modifier = Modifier.focusRequester(settingsRouteFocus), onClick = {
+                                    updateRoute = "gh-proxy"
+                                    settings.updateRoute = updateRoute
+                                    updateMessage = ""
+                                })
+                            FocusButton("直连", selected = updateRoute == "direct", enabled = updateBusy.isEmpty(), onClick = {
+                                updateRoute = "direct"
+                                settings.updateRoute = updateRoute
+                                updateMessage = ""
+                            })
+                        }
+                        if (updateMessage.isNotEmpty() || updateBusy == "downloading") {
+                            Label(if (updateBusy == "downloading") "正在下载更新 $updatePercent%（完成后打开安装程序）" else updateMessage,
+                                16, if (updateError) danger else muted, Modifier.padding(top = 10.dp))
+                        }
                     } }
                     item(key = "settings-sources-header") { Column {
                         Spacer(Modifier.height(8.dp))
@@ -704,7 +779,8 @@ private fun TvApp(onExit: () -> Unit) {
                         Row(
                             Modifier.fillMaxWidth().onPreviewKeyEvent { event ->
                                 if (index == 0 && event.key == Key.DirectionUp) {
-                                    if (event.type == KeyEventType.KeyDown) settingsHeaderTarget = settingsSearchFocus
+                                    if (event.type == KeyEventType.KeyDown) settingsHeaderTarget =
+                                        if (updateBusy.isEmpty()) settingsRouteFocus else settingsVersionFocus
                                     true
                                 } else false
                             }.background(panel, RoundedCornerShape(12.dp)).padding(12.dp),
@@ -819,6 +895,46 @@ private fun TvApp(onExit: () -> Unit) {
                     }
                 }
                 LaunchedEffect(prompt) { confirmOtherSourceFocus.requestFocus() }
+            }
+        }
+        val availableUpdate = updatePrompt
+        if (availableUpdate != null) {
+            Dialog(onDismissRequest = { updatePrompt = null; settingsHeaderTarget = settingsVersionFocus }) {
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(panel).padding(28.dp),
+                    verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                    Label("发现新版本 v${availableUpdate.version}", 24, white, bold = true)
+                    Label("是否下载更新？安装包约 %.1f MB，下载完成后将打开安装程序。".format(availableUpdate.size / 1024.0 / 1024.0), 18, muted)
+                    if (availableUpdate.notes.isNotBlank()) Label(availableUpdate.notes, 16, muted, maxLines = 5)
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        FocusButton("取消", modifier = Modifier.focusRequester(cancelUpdateFocus), onClick = {
+                            updatePrompt = null
+                            settingsHeaderTarget = settingsVersionFocus
+                        })
+                        FocusButton("同意", primary = true, onClick = {
+                            updatePrompt = null
+                            settingsHeaderTarget = settingsVersionFocus
+                            updateBusy = "downloading"
+                            updatePercent = 0
+                            updateMessage = ""
+                            updateError = false
+                            scope.launch {
+                                try {
+                                    withContext(Dispatchers.IO) {
+                                        updater.download { percent -> scope.launch { updatePercent = percent } }
+                                    }
+                                    val started = updater.install(context as MainActivity)
+                                    updateMessage = if (started) "安装程序已打开，请按提示完成更新。"
+                                        else "请允许安装未知应用，返回后会自动打开安装程序。"
+                                } catch (cancelled: CancellationException) { throw cancelled }
+                                catch (error: Exception) {
+                                    updateError = true
+                                    updateMessage = "更新失败：${error.message}。可重新点击版本号重试。"
+                                } finally { updateBusy = "" }
+                            }
+                        })
+                    }
+                }
+                LaunchedEffect(availableUpdate) { cancelUpdateFocus.requestFocus() }
             }
         }
         if (confirmClearHistory) {

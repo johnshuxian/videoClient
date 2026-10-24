@@ -222,6 +222,10 @@ class TvSettings(context: Context) {
         get() = getSetting("exact_search") == "true"
         set(value) { setSetting("exact_search", value.toString()) }
 
+    var updateRoute: String
+        get() = if (getSetting("update_route") == "direct") "direct" else "gh-proxy"
+        set(value) { setSetting("update_route", value) }
+
     var selectedSourceUrl: String
         get() = getSetting("selected_source_url").orEmpty()
         set(value) { setSetting("selected_source_url", value) }

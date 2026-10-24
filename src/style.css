@@ -1352,13 +1352,6 @@ a {
   font-size: 11px;
   font-weight: 500;
 }
-.line-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  margin: 16px 0 24px;
-}
-.line-list button,
 .episode-list button {
   background: #ffffff0d;
   color: #a9beca;
@@ -1367,25 +1360,18 @@ a {
   font-size: 11px;
   padding: 8px 11px;
 }
-.line-list button:hover,
 .episode-list button:hover {
   border-color: #ffffff66;
   color: #fff;
 }
-.line-list button:disabled,
 .episode-list button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
-.line-list button.active,
 .episode-list button.active {
   background: #d6bb8a24;
   border-color: #d6bb8a;
   color: #ecd2a2;
-}
-.episodes-title {
-  padding-top: 19px;
-  border-top: 1px solid #ffffff1a;
 }
 .episode-order-control {
   display: flex;
@@ -1747,6 +1733,43 @@ html[data-harmony="true"] .art-video-player.art-fullscreen-web .art-bottom {
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.04em;
+}
+.settings-version-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+.settings-version-button:hover,
+.settings-version-button:focus-visible {
+  color: #b99a6f;
+  background: #b99a6f18;
+}
+.update-route-row { gap: 16px; }
+.update-route-row select {
+  background: transparent;
+  color: inherit;
+  border: 1px solid #9b9ca566;
+  border-radius: 6px;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 12px;
+}
+.update-route-row option { background: #202025; color: #f7f7f9; }
+.light .update-route-row option { background: #fff; color: #17171c; }
+.settings-update-status { color: #9b9ca5; font-size: 12px; line-height: 1.6; }
+.settings-update-status.is-error { color: #db6b60; }
+.update-backdrop { z-index: 60; }
+.update-notes {
+  max-height: 200px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.6;
 }
 .settings-body {
   min-height: 0;
@@ -2214,8 +2237,7 @@ html[data-harmony="true"] .light .detail-overlay {
 .light .topbar,
 .light .drawer-header,
 .light .setting-row,
-.light .detail-toolbar,
-.light .episodes-title {
+.light .detail-toolbar {
   border-color: #e1e3e9;
 }
 .light .source-status,
@@ -2369,7 +2391,6 @@ html[data-harmony="true"] .light .detail-overlay {
 }
 .light .type-switch button,
 .light .tag-list button,
-.light .line-list button,
 .light .episode-list button {
   color: #4e6d7d;
 }
@@ -2502,20 +2523,17 @@ html[data-harmony="true"] .light .detail-overlay {
 .light .player-details-actors {
   border-color: #e1e3e9;
 }
-.light .line-list button,
 .light .episode-list button,
 .light .player-actions button {
   background: #f1f2f5;
   border-color: #dfe1e8;
   color: #426477;
 }
-.light .line-list button.active,
 .light .episode-list button.active {
   background: #efe9da;
   border-color: #b49a75;
   color: #6c5230;
 }
-.light .line-list button:hover:not(.active),
 .light .episode-list button:hover:not(.active),
 .light .load-more:hover {
   color: #304656;
@@ -3002,7 +3020,6 @@ body.player-web-fullscreen .app-shell {
     font-size: 16px;
   }
   .platform-android .player-actions button,
-  .platform-android .line-list button,
   .platform-android .episode-list button {
     min-height: 42px;
   }

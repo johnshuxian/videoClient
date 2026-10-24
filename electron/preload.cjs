@@ -2,6 +2,13 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("videoAPI", {
   platform: process.platform,
+  checkForUpdates: (route) => ipcRenderer.invoke("update:check", route),
+  downloadAndInstallUpdate: () => ipcRenderer.invoke("update:install"),
+  onUpdateProgress: (callback) => {
+    const listener = (_event, percent) => callback(percent);
+    ipcRenderer.on("update:progress", listener);
+    return () => ipcRenderer.removeListener("update:progress", listener);
+  },
   readSetting: (key) => ipcRenderer.sendSync("settings:read", key),
   saveSetting: (key, value) => {
     const error = ipcRenderer.sendSync("settings:save", key, value);

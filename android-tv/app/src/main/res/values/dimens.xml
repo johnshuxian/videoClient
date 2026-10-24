@@ -1,0 +1,6 @@
+<resources>
+    <!-- XML 与动态添加的播放器控件共用尺寸，保证底栏按钮和文字大小一致。 -->
+    <dimen name="tv_player_control_size">72dp</dimen>
+    <dimen name="tv_player_control_icon_padding">18dp</dimen>
+    <dimen name="tv_player_control_text_size">24sp</dimen>
+</resources>

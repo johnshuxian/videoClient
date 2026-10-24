@@ -16,6 +16,7 @@ val signingPassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
 
 android {
     namespace = "com.shuxian.videoclient.tv"
+    sourceSets.getByName("main").java.srcDir("../../android-shared/src/main/java")
     compileSdk = 36
 
     defaultConfig {

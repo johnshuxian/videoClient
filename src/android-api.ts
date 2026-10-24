@@ -2,11 +2,16 @@ import { CapacitorHttp, registerPlugin } from "@capacitor/core";
 import { CapacitorSQLite, SQLiteConnection } from "@capacitor-community/sqlite";
 import { createMobileVideoAPI } from "./mobile-api";
 import type { AppStatusBar, Dlna, VideoProxy } from "./mobile-api";
-import type { HistoryItem } from "./types";
+import type { AppUpdate, HistoryItem, UpdateRoute } from "./types";
 
 const proxy = registerPlugin<VideoProxy>("VideoProxy");
 const dlna = registerPlugin<Dlna>("Dlna");
 const statusBar = registerPlugin<AppStatusBar>("AppStatusBar");
+const appUpdate = registerPlugin<{
+  check(options: { route: UpdateRoute }): Promise<{ update: AppUpdate | null }>;
+  downloadAndInstall(): Promise<{ status: "started" | "permission-required" }>;
+  addListener(name: "progress", callback: (event: { percent: number }) => void): Promise<{ remove(): Promise<void> }>;
+}>("AppUpdate");
 
 export async function createAndroidVideoAPI(): Promise<Window["videoAPI"]> {
   const root = document.getElementById("root")!;
@@ -104,7 +109,7 @@ export async function createAndroidVideoAPI(): Promise<Window["videoAPI"]> {
     throw error;
   }
 
-  return createMobileVideoAPI({
+  const api = await createMobileVideoAPI({
     platform: "android",
     proxy,
     dlna,
@@ -221,4 +226,13 @@ export async function createAndroidVideoAPI(): Promise<Window["videoAPI"]> {
       }
     },
   });
+  return {
+    ...api,
+    checkForUpdates: async (route) => (await appUpdate.check({ route })).update,
+    downloadAndInstallUpdate: () => appUpdate.downloadAndInstall(),
+    onUpdateProgress: (callback) => {
+      const listener = appUpdate.addListener("progress", ({ percent }) => callback(percent));
+      return () => { void listener.then((handle) => handle.remove()); };
+    },
+  };
 }

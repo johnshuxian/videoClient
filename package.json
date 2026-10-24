@@ -1,6 +1,6 @@
 {
   "name": "videoclient",
-  "version": "0.2.42",
+  "version": "0.2.43",
   "private": true,
   "description": "Windows and macOS VOD desktop player",
   "main": "electron/main.cjs",
@@ -15,7 +15,7 @@
     "dist:android-tv": "cd android-tv && gradlew.bat assembleRelease",
     "sync:harmony": "npm run build:web:harmony && node scripts/sync-harmony.mjs",
     "probe:tvbox": "node scripts/probe-tvbox-sources.mjs",
-    "test": "node --test electron/*.test.cjs",
+    "test": "node --test --test-concurrency=1 electron/*.test.cjs",
     "format": "prettier --write src electron vite.config.ts"
   },
   "dependencies": {

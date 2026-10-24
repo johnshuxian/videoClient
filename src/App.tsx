@@ -29,6 +29,7 @@ import {
   X,
 } from "lucide-react";
 import type {
+  AppUpdate,
   CatalogItem,
   CatalogType,
   Device,
@@ -38,6 +39,7 @@ import type {
   SourceCategory,
   SourceHealth,
   VodDetail,
+  UpdateRoute,
 } from "./types";
 
 // 补齐豆瓣分类接口列出的标签，并保留现有可用的“动画”和“最新”入口。
@@ -610,7 +612,7 @@ function Player({
       stallTimeout = window.setTimeout(() => {
         const art = artRef.current;
         if (art && !art.video.paused && !art.video.ended)
-          failPlayback("视频缓冲超时，请切换线路。");
+          failPlayback("视频缓冲超时，请选择其他资源。");
       }, 30000);
     };
     const source = {
@@ -625,7 +627,7 @@ function Player({
     sourceRef.current = source;
     // 有些失效线路既不返回视频数据，也不触发 media error，需要限定首次加载时间。
     startupTimeout = window.setTimeout(
-      () => failPlayback("视频加载超时，请切换线路。"),
+      () => failPlayback("视频加载超时，请选择其他资源。"),
       30000,
     );
     window.videoAPI
@@ -698,21 +700,21 @@ function Player({
                   let message = `视频加载失败：${data.details}`;
                   if (data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR) {
                     if (status === 401 || status === 403)
-                      message = `源站拒绝访问视频清单（HTTP ${status}），请切换线路。`;
+                      message = `源站拒绝访问视频清单（HTTP ${status}），请选择其他资源。`;
                     else if (status === 404 || status === 410)
-                      message = `视频清单地址已失效（HTTP ${status}），请切换线路。`;
+                      message = `视频清单地址已失效（HTTP ${status}），请选择其他资源。`;
                     else if (status)
-                      message = `视频清单请求失败（HTTP ${status}），请稍后重试或切换线路。`;
+                      message = `视频清单请求失败（HTTP ${status}），请稍后重试或选择其他资源。`;
                     else
-                      message = "视频清单请求失败，请检查网络或切换线路。";
+                      message = "视频清单请求失败，请检查网络或选择其他资源。";
                   } else if (
                     data.details === Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT
                   ) {
-                    message = "视频清单加载超时，请稍后重试或切换线路。";
+                    message = "视频清单加载超时，请稍后重试或选择其他资源。";
                   } else if (
                     data.details === Hls.ErrorDetails.MANIFEST_PARSING_ERROR
                   ) {
-                    message = "源站返回的播放清单格式无效，请切换线路。";
+                    message = "源站返回的播放清单格式无效，请选择其他资源。";
                   }
                   current.fail(message);
                 });
@@ -819,7 +821,7 @@ function Player({
           sourceRef.current.clearTimers();
           onPlayingRef.current();
         });
-        // 播放途中若一直转圈且没有触发 error，也继续尝试右侧的其他线路。
+        // 播放途中若一直转圈且没有触发 error，也继续自动尝试其他线路。
         art.on("video:waiting", () => sourceRef.current?.watchStall());
         art.on("video:stalled", () => sourceRef.current?.watchStall());
         art.on("video:pause", () => {
@@ -832,12 +834,12 @@ function Player({
           const code = art?.video.error?.code;
           const message =
             code === MediaError.MEDIA_ERR_NETWORK
-              ? "视频请求失败，请稍后重试或切换线路。"
+              ? "视频请求失败，请稍后重试或选择其他资源。"
               : code === MediaError.MEDIA_ERR_DECODE
                 ? "视频解码失败，当前编码可能不受播放器支持。"
                 : code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
                   ? "该地址未返回可播放的视频流，可能是网页播放地址或不支持的格式。"
-                  : "该线路暂时无法播放，请切换线路或集数。";
+                  : "该线路暂时无法播放，请选择其他资源或集数。";
           sourceRef.current?.fail(message);
         });
       })
@@ -926,6 +928,15 @@ export default function App() {
   const [exactSearch, setExactSearch] = useState(
     readStorage("exact-search", false),
   );
+  const supportsUpdates = !!window.videoAPI.checkForUpdates;
+  const [updateRoute, setUpdateRoute] = useState<UpdateRoute>(() =>
+    readStorage<UpdateRoute>("update-route", "gh-proxy") === "direct" ? "direct" : "gh-proxy",
+  );
+  const [appUpdate, setAppUpdate] = useState<AppUpdate | null>(null);
+  const [updateBusy, setUpdateBusy] = useState<"" | "checking" | "downloading">("");
+  const [updateProgress, setUpdateProgress] = useState(0);
+  const [updateMessage, setUpdateMessage] = useState("");
+  const [updateError, setUpdateError] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>(() =>
     window.videoAPI.listHistory(),
   );
@@ -1037,6 +1048,43 @@ export default function App() {
     }, 260);
   }
 
+  async function checkForUpdates() {
+    if (updateBusy || !window.videoAPI.checkForUpdates) return;
+    setUpdateBusy("checking");
+    setUpdateMessage("正在检查更新…");
+    setUpdateError(false);
+    try {
+      const update = await window.videoAPI.checkForUpdates(updateRoute);
+      setAppUpdate(update);
+      setUpdateMessage(update ? "发现新版本" : "当前已是最新版本");
+    } catch (error) {
+      setUpdateError(true);
+      setUpdateMessage(`检查更新失败：${error instanceof Error ? error.message : String(error)}。可切换线路后重试。`);
+    } finally { setUpdateBusy(""); }
+  }
+
+  async function installUpdate() {
+    if (updateBusy || !window.videoAPI.downloadAndInstallUpdate) return;
+    setAppUpdate(null);
+    setUpdateProgress(0);
+    setUpdateBusy("downloading");
+    setUpdateMessage("");
+    setUpdateError(false);
+    try {
+      const result = await window.videoAPI.downloadAndInstallUpdate();
+      setUpdateMessage(result.status === "permission-required"
+        ? "请允许安装未知应用，返回后会自动打开安装程序。"
+        : window.videoAPI.platform === "darwin"
+          ? "安装镜像已打开，请将影窗拖入“应用程序”完成更新。"
+          : "安装程序已打开，请按提示完成更新。");
+    } catch (error) {
+      setUpdateError(true);
+      setUpdateMessage(`更新失败：${error instanceof Error ? error.message : String(error)}。可重新点击版本号重试。`);
+    } finally { setUpdateBusy(""); }
+  }
+
+  useEffect(() => window.videoAPI.onUpdateProgress?.(setUpdateProgress), []);
+
   function closeDetail(immediate = false) {
     if (detailClosing) return;
     ++detailSerial.current;
@@ -1116,6 +1164,7 @@ export default function App() {
     const goBack = () => {
       if (playerInstance.current?.fullscreenWeb)
         playerInstance.current.fullscreenWeb = false;
+      else if (appUpdate) setAppUpdate(null);
       else if (sourceFormatOpen) setSourceFormatOpen(false);
       else if (castOpen) setCastOpen(false);
       else if (otherSourcePrompt) setOtherSourcePrompt(null);
@@ -1147,6 +1196,7 @@ export default function App() {
       remove?.();
     };
   }, [
+    appUpdate,
     sourceFormatOpen,
     castOpen,
     otherSourcePrompt,
@@ -2944,7 +2994,7 @@ export default function App() {
           <div className="detail-scroll" ref={detailScroll}>
             {detailLoading ? (
               <div className="loading detail-loading">
-                <LoaderCircle className="spin" size={24} /> 正在获取播放线路...
+                <LoaderCircle className="spin" size={24} /> 正在获取播放信息...
               </div>
             ) : detailError ? (
               <div className="empty">
@@ -3165,35 +3215,13 @@ export default function App() {
                     )}
                   </div>
                   <div className="episode-panel">
-                    <div className="panel-title">
-                      <span>播放线路</span>
-                      <strong>{detail.lines.length} 条</strong>
-                    </div>
                     {detail.lines.length === 0 ? (
                       <div className="notice">
                         这个资源暂时没有可播放地址，请返回换一个源。
                       </div>
                     ) : (
                       <>
-                        <div className="line-list">
-                          {detail.lines.map((item, index) => (
-                            <button
-                              key={`${item.name}-${index}`}
-                              className={line === index ? "active" : ""}
-                              disabled={!!casting}
-                              onClick={() => {
-                                failedLines.current.clear();
-                                fallbackPosition.current = null;
-                                otherSourceReference.current = null;
-                                setLine(index);
-                                setEpisode(null);
-                              }}
-                            >
-                              {item.name}
-                            </button>
-                          ))}
-                        </div>
-                        <div className="panel-title episodes-title">
+                        <div className="panel-title">
                           <span>选集播放</span>
                           <div
                             className="episode-order-control"
@@ -3315,7 +3343,14 @@ export default function App() {
                 <span>偏好设置</span>
                 <h2>让观影更顺手</h2>
               </div>
-              <small className="settings-version">v{version}</small>
+              {supportsUpdates ? (
+                <button className="settings-version settings-version-button" title="检查更新"
+                  aria-label={`当前版本 v${version}，点击检查更新`} disabled={!!updateBusy}
+                  onClick={() => void checkForUpdates()}>
+                  {updateBusy === "checking" && <LoaderCircle className="spin" size={12} />}
+                  v{version}
+                </button>
+              ) : <small className="settings-version">v{version}</small>}
             </div>
             <div className="settings-body">
               <h3>外观</h3>
@@ -3363,6 +3398,25 @@ export default function App() {
                   }}
                 />
               </label>
+              {supportsUpdates && <>
+                <label className="setting-row update-route-row">
+                  <div><strong>线路选择</strong><p>用于检查更新和下载安装包</p></div>
+                  <select aria-label="更新线路" value={updateRoute} disabled={!!updateBusy}
+                    onChange={(event) => {
+                      const route = event.target.value as UpdateRoute;
+                      setUpdateRoute(route);
+                      saveStorage("update-route", route);
+                      setUpdateMessage("");
+                    }}>
+                    <option value="gh-proxy">gh-proxy</option>
+                    <option value="direct">直连</option>
+                  </select>
+                </label>
+                {(updateMessage || updateBusy === "downloading") &&
+                  <p className={`settings-update-status${updateError ? " is-error" : ""}`} role="status">
+                    {updateBusy === "downloading" ? `正在下载更新 ${updateProgress}%（完成后打开安装程序）` : updateMessage}
+                  </p>}
+              </>}
               <div className="settings-subhead">
                 <h3>
                   点播源{" "}
@@ -3529,6 +3583,22 @@ export default function App() {
               >
                 了解点播源格式 <ChevronDown size={14} />
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {appUpdate && (
+        <div className="modal-backdrop update-backdrop" onKeyDown={(event) => {
+          if (event.key === "Escape") { event.stopPropagation(); setAppUpdate(null); }
+        }}>
+          <div className="cast-modal update-modal" role="dialog" aria-modal="true" aria-labelledby="update-title">
+            <div className="modal-heading"><h2 id="update-title">发现新版本 v{appUpdate.version}</h2></div>
+            <p>是否下载更新？安装包约 {(appUpdate.size / 1024 / 1024).toFixed(1)} MB，下载完成后将打开安装程序。</p>
+            {appUpdate.notes && <pre className="update-notes">{appUpdate.notes}</pre>}
+            <div className="other-source-actions">
+              <button className="load-more" autoFocus onClick={() => setAppUpdate(null)}>取消</button>
+              <button className="primary-button" onClick={() => void installUpdate()}>同意</button>
             </div>
           </div>
         </div>
