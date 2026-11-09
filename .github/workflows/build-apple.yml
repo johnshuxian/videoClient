@@ -81,8 +81,8 @@ jobs:
         run: bash apple/Scripts/package-ipa.sh "${{ matrix.platform }}" > "$RUNNER_TEMP/apple-build.log" 2>&1
       - uses: actions/upload-artifact@v7
         with:
-          name: videoClient-${{ env.RELEASE_TAG }}-${{ matrix.artifact }}-unsigned
           path: apple/Release/YingChuang-${{ matrix.artifact }}-*-unsigned.ipa
+          archive: false
           if-no-files-found: error
           retention-days: 3
 
