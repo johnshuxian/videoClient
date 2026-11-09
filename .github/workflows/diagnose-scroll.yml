@@ -7,6 +7,10 @@ on:
         description: '源码版本标签，例如 v0.2.62'
         required: true
         type: string
+      eager_grid:
+        description: '首页前 24 张使用非懒加载布局'
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -51,6 +55,54 @@ jobs:
           source = source.replace(image, 'Color(white: 0.22)', 1)
           path.write_text(source, encoding="utf-8")
           PY
+      - name: Use eagerly created rows for comparison
+        if: ${{ inputs.eager_grid }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("apple/App/Views/CatalogScreen.swift")
+          source = path.read_text(encoding="utf-8")
+          call = "                            grid\n"
+          begin = "    private var grid: some View {\n"
+          end = "    private func recommendationPoster("
+          recommendation = '            if item.id == model.recommendations.suffix(8).first?.id { loadNext() }\n'
+          video = '            if item.id == model.videos.suffix(8).first?.id { loadNext() }\n'
+          if any(source.count(value) != 1 for value in (call, begin, end, recommendation, video)):
+              raise SystemExit("首页网格代码已变化，无法安全生成诊断版")
+          # 只创建前 24 张，避免非懒加载触发无限分页或占用过多内存。
+          replacement = r'''    private func grid(width: CGFloat) -> some View {
+              let count = min(max(model.recommendations.count, model.videos.count), 24)
+              let cellWidth = (width - 30 * 5) / 6
+              return VStack(alignment: .leading, spacing: 34) {
+                  ForEach(0..<((count + 5) / 6), id: \.self) { row in
+                      HStack(spacing: 30) {
+                          ForEach(0..<6, id: \.self) { column in
+                              let index = row * 6 + column
+                              if index < count {
+                                  if model.recommendations.indices.contains(index) {
+                                      recommendationPoster(model.recommendations[index]).frame(width: cellWidth)
+                                  } else if model.videos.indices.contains(index) {
+                                      sourcePoster(model.videos[index]).frame(width: cellWidth)
+                                  }
+                              }
+                          }
+                      }
+                  }
+              }.padding(.top, 16).tvFocusSection()
+                  .tvGridDownFallback(ids: { posterKeys }, columns: 6, focus: $focused,
+                                      enabled: store.tvFocus.catalogActive, onFocus: requestFocus)
+          }
+
+          '''
+          start = source.index(begin)
+          stop = source.index(end, start)
+          source = source[:start] + replacement + source[stop:]
+          source = source.replace(call, '                            grid(width: geometry.size.width - 2 * Layout.pagePadding)\n', 1)
+          source = source.replace(recommendation, '', 1).replace(video, '', 1)
+          path.write_text(source, encoding="utf-8")
+          PY
       - name: Build unsigned diagnostic IPA
         shell: bash
         run: |
@@ -61,10 +113,15 @@ jobs:
             echo '::error::未找到唯一的 tvOS IPA'
             exit 1
           fi
-          mv "${files[0]}" "${files[0]%-unsigned.ipa}-scroll-diagnostic-unsigned.ipa"
+          if [[ '${{ inputs.eager_grid }}' == 'true' ]]; then
+            suffix='scroll-eager-diagnostic'
+          else
+            suffix='scroll-diagnostic'
+          fi
+          mv "${files[0]}" "${files[0]%-unsigned.ipa}-${suffix}-unsigned.ipa"
       - uses: actions/upload-artifact@v7
         with:
-          path: apple/Release/YingChuang-tvOS-*-scroll-diagnostic-unsigned.ipa
+          path: apple/Release/YingChuang-tvOS-*-diagnostic-unsigned.ipa
           archive: false
           if-no-files-found: error
           retention-days: 3
