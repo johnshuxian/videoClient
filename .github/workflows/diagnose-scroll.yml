@@ -1,0 +1,71 @@
+name: Diagnose Apple TV scrolling
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '源码版本标签，例如 v0.2.62'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build blank-poster diagnostic IPA
+    runs-on: macos-26
+    env:
+      SOURCE_TAG: ${{ inputs.version }}
+    steps:
+      - name: Validate source tag
+        shell: bash
+        run: |
+          if [[ ! "$SOURCE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo '::error::版本必须为 vX.Y.Z'
+            exit 1
+          fi
+      - uses: actions/checkout@v7
+        with:
+          repository: johnshuxian/videoClient-source
+          ref: ${{ env.SOURCE_TAG }}
+          ssh-key: ${{ secrets.SOURCE_SSH_KEY }}
+          persist-credentials: false
+      - name: Verify source version
+        shell: bash
+        run: |
+          node -e 'if ("v" + require("./package.json").version !== process.env.SOURCE_TAG) { console.error("版本标签与 package.json 不一致"); process.exit(1); }'
+      - name: Replace poster images with solid color
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("apple/App/Views/DesignSystem.swift")
+          source = path.read_text(encoding="utf-8")
+          condition = 'if let image, imageKey == "\\(address)@\\(width)" {'
+          image = 'Image(uiImage: image).resizable().scaledToFill()'
+          if source.count(condition) != 1 or source.count(image) != 1:
+              raise SystemExit("海报显示代码已变化，无法安全生成诊断版")
+          source = source.replace(condition, 'if image != nil, imageKey == "\\(address)@\\(width)" {', 1)
+          source = source.replace(image, 'Color(white: 0.22)', 1)
+          path.write_text(source, encoding="utf-8")
+          PY
+      - name: Build unsigned diagnostic IPA
+        shell: bash
+        run: |
+          bash apple/Scripts/package-ipa.sh tvos > "$RUNNER_TEMP/apple-build.log" 2>&1
+          shopt -s nullglob
+          files=(apple/Release/YingChuang-tvOS-*-unsigned.ipa)
+          if [[ ${#files[@]} -ne 1 ]]; then
+            echo '::error::未找到唯一的 tvOS IPA'
+            exit 1
+          fi
+          mv "${files[0]}" "${files[0]%-unsigned.ipa}-scroll-diagnostic-unsigned.ipa"
+      - uses: actions/upload-artifact@v7
+        with:
+          path: apple/Release/YingChuang-tvOS-*-scroll-diagnostic-unsigned.ipa
+          archive: false
+          if-no-files-found: error
+          retention-days: 3
+
