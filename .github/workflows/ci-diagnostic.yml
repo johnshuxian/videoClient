@@ -1,0 +1,51 @@
+name: Private test diagnostic
+on:
+  push:
+    branches: ['codex/ci-diagnostic-v0265']
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+jobs:
+  diagnose:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: johnshuxian/videoClient-source
+          ref: v0.2.65
+          ssh-key: ${{ secrets.SOURCE_SSH_KEY }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci > "$RUNNER_TEMP/diagnostic-install.log" 2>&1
+      - name: Test with anonymized failure identifiers
+        run: |
+          set +e
+          npm test > "$RUNNER_TEMP/diagnostic-tests.log" 2>&1
+          test_status=$?
+          set -e
+          node - "$RUNNER_TEMP/diagnostic-tests.log" <<'NODE'
+          const fs = require('fs');
+          const crypto = require('crypto');
+          const contents = fs.readFileSync(process.argv[2], 'utf8');
+          const hash = text => crypto.createHash('sha256').update(text).digest('hex').slice(0, 16);
+          for (const line of contents.split(/\r?\n/)) {
+            const failure = line.match(/^\s*not ok \d+ - (.+)$/);
+            if (failure) console.log('failed-test-sha256:', hash(failure[1].trim()));
+            const diff = line.match(/^\s*([+-])\s*(\w+):\s*(true|false|\d+(?:\.\d+)?),?\s*$/);
+            if (diff) console.log('assertion-field-sha256:', hash(diff[2]), diff[1], diff[3]);
+          }
+          for (const key of ['testTimeoutFailure', 'ERR_MODULE_NOT_FOUND', 'ERR_ASSERTION', 'ECONNREFUSED', 'SIGKILL']) {
+            if (contents.includes(key)) console.log('failure-kind:', key);
+          }
+          NODE
+          exit "$test_status"
