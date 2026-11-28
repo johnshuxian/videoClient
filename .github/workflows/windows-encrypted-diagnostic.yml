@@ -1,0 +1,59 @@
+name: Encrypted Windows diagnostic
+on:
+  push:
+    branches: [codex/windows-diagnostic-067]
+    paths: [.github/workflows/windows-encrypted-diagnostic.yml]
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: johnshuxian/videoClient-source
+          ref: e633f2e1746d7298a89eaf84c160f9e4e116e591
+          ssh-key: ${{ secrets.SOURCE_SSH_KEY }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        shell: bash
+        run: npm ci > "$RUNNER_TEMP/npm-ci.log" 2>&1
+      - name: Test and encrypt diagnostics
+        shell: bash
+        run: |
+          if npm test > "$RUNNER_TEMP/desktop-tests.log" 2>&1; then
+            echo 'Windows desktop tests passed'
+            exit 0
+          fi
+          gzip -c "$RUNNER_TEMP/desktop-tests.log" > "$RUNNER_TEMP/diagnostic.gz"
+          cat > "$RUNNER_TEMP/recipient.pem" <<'CERTIFICATE'
+          -----BEGIN CERTIFICATE-----
+          MIIDGzCCAgOgAwIBAgIUdeEXRCnC1w4IJjPw9QXMzi7NeBIwDQYJKoZIhvcNAQEL
+          BQAwHTEbMBkGA1UEAwwSV2luZG93cyBkaWFnbm9zdGljMB4XDTI2MTEyODA5MjA0
+          MloXDTI2MTEzMDA5MjA0MlowHTEbMBkGA1UEAwwSV2luZG93cyBkaWFnbm9zdGlj
+          MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAoAKv9SQSkCG2Q7yHbCF7
+          hPrF6gArMpL34TovqijaySTr+NYu8h6heHjRL6TjkGkZsleSkEqi/8+JvJTEmQ+t
+          xhNqsyyRyaH7kjVsHS+mpR9XiU/RJhu7G0z7Yzap6P44BRL70YsLX57VBXARWoDe
+          q11DqODVvme6eR/UDhjlmEXIlH9JhUiGzg+vzlXvcnt0uPu85C3RDCRAwkzx428y
+          /MdqWih/XntcqfN0qrlPaL1BrZKZsmLLIZ+KqZWl5pzF7tVd0pplmMMQ3AsDD9xq
+          b/uVmg2mUgWGivxTuV5RzVkzEIkJaogpZw8VDwTBr1MW8TaGsC2VTE/rxO3mLmTP
+          +wIDAQABo1MwUTAdBgNVHQ4EFgQUeTFAcTrvd3t6ow6lzSzjnlTiEyswHwYDVR0j
+          BBgwFoAUeTFAcTrvd3t6ow6lzSzjnlTiEyswDwYDVR0TAQH/BAUwAwEB/zANBgkq
+          hkiG9w0BAQsFAAOCAQEAdClVE+OVvw/aGxONeKQUDlBgKF7qys1j8s9LEqESd+Ad
+          WkHVE3h6NBUZv/qC77tlSOVZ91QFdQ+vT9YO/1T1riDHIcnjCyWWeN/GiXf+6Epy
+          pxuRLOdHAEWUC2iqPqKCV0oCHJLsHFD079jZeGqng8lwZPNk0ZhIdaLhaa+LnsHJ
+          sq+PYwNrfsYgHuTD6o/vxneawwRT7urUYG1Io1v9KoH8GFmoUgerYQ2bZqRucp80
+          O4S5bcP2n2YwrtGBs2nfWaMflGojuSecmcRS3nxbyVr+HGOVEK9/sLrBG5+ubBoc
+          jSDdaMGLdFP1kEmTPZL/ive2hWwzZQDYpK1vf8/vUw==
+          -----END CERTIFICATE-----
+          CERTIFICATE
+          openssl cms -encrypt -binary -aes-256-cbc -in "$RUNNER_TEMP/diagnostic.gz" -out "$RUNNER_TEMP/diagnostic.der" -outform DER "$RUNNER_TEMP/recipient.pem"
+          echo 'ENCRYPTED_DIAGNOSTIC_BEGIN'
+          base64 -w 0 "$RUNNER_TEMP/diagnostic.der"
+          echo
+          echo 'ENCRYPTED_DIAGNOSTIC_END'
+          exit 1
