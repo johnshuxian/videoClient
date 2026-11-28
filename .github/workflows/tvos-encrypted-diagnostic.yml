@@ -15,6 +15,37 @@ jobs:
           ref: dd7eb616af587337314027f1cc525a988d7fa562
           ssh-key: ${{ secrets.SOURCE_SSH_KEY }}
           persist-credentials: false
+      - name: Prepare tvOS-compatible QuickJS
+        shell: bash
+        run: |
+          git clone --depth 1 --branch v1.0.0 https://github.com/zqqf16/QuickJS-Swift.git apple/Packages/QuickJS > "$RUNNER_TEMP/quickjs-clone.log" 2>&1
+          python3 - <<'PY'
+          from pathlib import Path
+          manifest = Path("apple/Packages/VideoCore/Package.swift")
+          content = manifest.read_text()
+          lines = content.splitlines(keepends=True)
+          found = 0
+          for i, line in enumerate(lines):
+              if "QuickJS-Swift.git" in line:
+                  lines[i] = '        .package(path: "../QuickJS"),\n'
+                  found += 1
+              elif '.product(name: "QuickJS"' in line:
+                  lines[i] = line.replace('package: "QuickJS-Swift"', 'package: "QuickJS"')
+          assert found == 1
+          manifest.write_text("".join(lines))
+          path = Path("apple/Packages/QuickJS/Sources/QuickJSC/quickjs-libc.c")
+          content = path.read_text()
+          changes = [
+              ("#if defined(__APPLE__)\n#if !defined(environ)", "#if defined(__APPLE__)\n#include <TargetConditionals.h>\n#if !defined(environ)"),
+              ("/* execvpe is not available on non GNU systems */", "/* tvOS prohibits process creation, and the app does not expose the os module. */\n#if !defined(__APPLE__) || !TARGET_OS_TV\n/* execvpe is not available on non GNU systems */"),
+              ("/* getpid() -> pid */", "#endif\n\n/* getpid() -> pid */"),
+              ('    JS_CFUNC_DEF("exec", 1, js_os_exec ),', '#if !defined(__APPLE__) || !TARGET_OS_TV\n    JS_CFUNC_DEF("exec", 1, js_os_exec ),\n#endif')
+          ]
+          for before, after in changes:
+              assert content.count(before) == 1
+              content = content.replace(before, after)
+          path.write_text(content)
+          PY
       - name: Build and encrypt diagnostics
         shell: bash
         run: |
