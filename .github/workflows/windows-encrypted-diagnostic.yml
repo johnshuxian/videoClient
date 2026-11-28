@@ -22,6 +22,11 @@ jobs:
       - name: Install dependencies
         shell: bash
         run: npm ci > "$RUNNER_TEMP/npm-ci.log" 2>&1
+      - name: Preserve generated resource line endings
+        shell: bash
+        run: |
+          printf '%s\n' 'apple/Packages/VideoCore/Sources/VideoCore/Resources/xptv-libs.js text eol=lf' > .gitattributes
+          git -c core.autocrlf=true checkout -- apple/Packages/VideoCore/Sources/VideoCore/Resources/xptv-libs.js
       - name: Test and encrypt diagnostics
         shell: bash
         run: |
