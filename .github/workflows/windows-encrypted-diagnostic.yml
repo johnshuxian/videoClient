@@ -26,7 +26,9 @@ jobs:
         shell: bash
         run: |
           printf '%s\n' 'apple/Packages/VideoCore/Sources/VideoCore/Resources/xptv-libs.js text eol=lf' > .gitattributes
+          rm -- apple/Packages/VideoCore/Sources/VideoCore/Resources/xptv-libs.js
           git -c core.autocrlf=true checkout -- apple/Packages/VideoCore/Sources/VideoCore/Resources/xptv-libs.js
+          node -e 'const fs = require("fs"); const esbuild = require("esbuild"); const s = fs.readFileSync("apple/Packages/VideoCore/Sources/VideoCore/Resources/xptv-libs.js", "utf8"); const b = esbuild.buildSync({entryPoints:["electron/xptv-libs-entry.js"],bundle:true,platform:"browser",format:"iife",minify:true,write:false}).outputFiles[0].text; console.log(JSON.stringify({equal:s===b, checkedOutLength:s.length, generatedLength:b.length, crlf:(s.match(/\\r\\n/g)||[]).length})); if (s!==b) process.exit(1);'
       - name: Test and encrypt diagnostics
         shell: bash
         run: |
